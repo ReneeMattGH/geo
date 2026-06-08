@@ -349,10 +349,6 @@ function App() {
                         )}
                     </AnimatePresence>
                 </motion.button>
-
-                <div className="fixed left-3 bottom-3 sm:left-4 sm:bottom-4 z-50 pointer-events-none font-mono text-[10px] sm:text-xs tracking-wide text-white/60">
-                    made by shreeya gupta and rushit palesha
-                </div>
             </div>
         </div>
     )
