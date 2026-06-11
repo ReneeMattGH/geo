@@ -279,7 +279,7 @@ def _synthetic_market_impact(iso: str) -> dict:
 async def get_country_market_impact(
     iso: str,
 ) -> dict:
-    """Return market impact data for a specific country — real Finnhub quotes + mock chart. Never 500s."""
+    """Return market impact data for a specific country — real Finnhub quotes. Never 500s."""
     iso = (iso or "").strip().upper()
     if len(iso) == 3:
         iso = ISO3_TO_ISO2.get(iso, iso)
@@ -289,7 +289,7 @@ async def get_country_market_impact(
         return await _fetch_market_impact(iso)
     except Exception as exc:
         logger.warning("market_impact_fetch_failed", iso=iso, error=str(exc))
-        return _synthetic_market_impact(iso)
+        return {"error": "Data temporarily unavailable"}
 
 
 async def _fetch_market_impact(iso: str) -> dict:

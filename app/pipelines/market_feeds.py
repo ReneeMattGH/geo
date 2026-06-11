@@ -861,11 +861,6 @@ def _build_default_adapter() -> RealMarketAdapter | Any:
     """
     keys = _load_finnhub_keys()
     if not any(keys):
-        from app.core.config import get_settings
-        settings = get_settings()
-        if settings.app_env == "development":
-            logger.warning("FINNHUB_API_KEY not set. Using mock adapter for development.")
-            return _MockMarketAdapter()
         raise RuntimeError(
             "FINNHUB_API_KEY is not set. Add it to .env — synthetic data is disabled."
         )
@@ -876,31 +871,6 @@ def _build_default_adapter() -> RealMarketAdapter | Any:
         key_prefixes=[k[:8] for k in adapter._keys],
     )
     return adapter
-
-
-class _MockMarketAdapter(MarketFeedAdapter):
-    name = "mock"
-    async def fetch_latest(self, symbols: list[str]) -> list[MarketTick]:
-        now = datetime.now(UTC)
-        ticks = []
-        for sym in symbols:
-            meta = FINNHUB_SYMBOL_MAP.get(sym, {"class": "equity", "region": "global", "base": 100.0})
-            base = meta.get("base", 100.0)
-            price = base * (1 + (np.random.random() - 0.5) * 0.02)
-            ticks.append(MarketTick(
-                symbol=sym,
-                asset_class=meta["class"],
-                region=meta["region"],
-                ts=now,
-                open=price, high=price*1.01, low=price*0.99, close=price,
-                volume=1000.0,
-                realized_vol=0.2,
-                return_1d=0.01,
-                source="mock"
-            ))
-        return ticks
-    async def fetch_history(self, symbol: str, start: datetime, end: datetime) -> list[MarketTick]:
-        return []
 
 
 _feed_manager: MarketFeedManager | None = None

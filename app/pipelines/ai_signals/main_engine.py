@@ -57,20 +57,46 @@ class AISignalsEngine:
                 if price == 0.0:
                     continue
 
-                # 4a. Build features
-                # In real implementation, we'd fetch high/low/close history for ATR
-                # Using dummy history for now based on current price
-                history = [price * (1 + (i/1000.0)) for i in range(-20, 1)]
-                atr = self.feature_svc.calculate_atr(history, history, history)
+                # 4a. Build features - fetch real historical data for ATR calculation
+                try:
+                    # Fetch historical data for ATR calculation
+                    end = datetime.now(UTC)
+                    start = end - timedelta(days=20)
+                    history_ticks = await self.feed_mgr.fetch_history(tick.symbol, start, end)
+                    
+                    if history_ticks and len(history_ticks) >= 14:
+                        highs = [t.high for t in history_ticks]
+                        lows = [t.low for t in history_ticks]
+                        closes = [t.close for t in history_ticks]
+                        atr = self.feature_svc.calculate_atr(highs, lows, closes)
+                        
+                        # Calculate real returns from historical data
+                        if len(closes) >= 5:
+                            returns_short_term = (closes[-1] - closes[-2]) / closes[-2] if closes[-2] > 0 else 0.0
+                            returns_long_term = (closes[-1] - closes[-5]) / closes[-5] if closes[-5] > 0 else 0.0
+                        else:
+                            returns_short_term = 0.0
+                            returns_long_term = 0.0
+                    else:
+                        # Fallback to current price if insufficient history
+                        atr = price * 0.02
+                        returns_short_term = 0.0
+                        returns_long_term = 0.0
+                except Exception as e:
+                    logger.error(f"Error fetching historical data for {tick.symbol}: {e}")
+                    atr = price * 0.02
+                    returns_short_term = 0.0
+                    returns_long_term = 0.0
+                
                 vol_regime = self.feature_svc.calculate_volatility_regime([price])
                 
                 features = EnhancedAssetFeatures(
                     symbol=tick.symbol,
                     asset_class=tick.asset_class,
                     price=price,
-                    returns_short_term=0.01, # dummy 1d return
-                    returns_long_term=0.05,  # dummy 5d return
-                    atr=atr if atr > 0 else tick.price * 0.02,
+                    returns_short_term=returns_short_term,
+                    returns_long_term=returns_long_term,
+                    atr=atr if atr > 0 else price * 0.02,
                     volatility_regime=vol_regime,
                     sentiment_score=sentiment_score,
                     geopolitical_tension_index=25.0, # fallback GTI

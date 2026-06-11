@@ -67,9 +67,9 @@ class TradeEngine:
             stop_loss = entry + (atr * sl_multiplier)
             target = entry - (atr * sl_multiplier * 2.5)
         else:
-            # HOLD - dummy values
-            stop_loss = entry * 0.95
-            target = entry * 1.05
+            # HOLD - use ATR-based levels for consistency
+            stop_loss = entry - (atr * sl_multiplier)
+            target = entry + (atr * sl_multiplier * 2.5)
             
         risk = abs(entry - stop_loss)
         reward = abs(target - entry)

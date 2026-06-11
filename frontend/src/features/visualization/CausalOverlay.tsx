@@ -27,29 +27,35 @@ interface CausalOverlayProps {
 export function CausalOverlay({ isVisible, onClose }: CausalOverlayProps) {
     const [activeNodes, setActiveNodes] = useState<string[]>([]);
     const [propagationStep, setPropagationStep] = useState(0);
+    const [nodes, setNodes] = useState<CausalNode[]>([]);
+    const [links, setLinks] = useState<CausalLink[]>([]);
 
-    // Sample causal network data
-    const nodes: CausalNode[] = [
-        { id: 'russia', type: 'country', name: 'Russia', position: { x: 20, y: 30 }, impact: -0.8, confidence: 0.95 },
-        { id: 'ukraine', type: 'country', name: 'Ukraine', position: { x: 25, y: 35 }, impact: -0.6, confidence: 0.90 },
-        { id: 'energy', type: 'sector', name: 'Energy', position: { x: 50, y: 25 }, impact: 0.7, confidence: 0.85 },
-        { id: 'defense', type: 'sector', name: 'Defense', position: { x: 45, y: 40 }, impact: 0.6, confidence: 0.80 },
-        { id: 'commodities', type: 'sector', name: 'Commodities', position: { x: 55, y: 50 }, impact: 0.5, confidence: 0.75 },
-        { id: 'oil', type: 'asset', name: 'Crude Oil', position: { x: 80, y: 20 }, impact: 0.8, confidence: 0.90 },
-        { id: 'gas', type: 'asset', name: 'Natural Gas', position: { x: 85, y: 30 }, impact: 0.9, confidence: 0.92 },
-        { id: 'wheat', type: 'asset', name: 'Wheat', position: { x: 75, y: 55 }, impact: 0.4, confidence: 0.70 },
-        { id: 'gold', type: 'asset', name: 'Gold', position: { x: 70, y: 70 }, impact: 0.3, confidence: 0.65 },
-    ];
+    // Fetch causal network data from backend
+    useEffect(() => {
+        if (!isVisible) return;
 
-    const links: CausalLink[] = [
-        { source: 'russia', target: 'energy', strength: 0.9, delay: 500, type: 'negative' },
-        { source: 'russia', target: 'defense', strength: 0.7, delay: 800, type: 'positive' },
-        { source: 'ukraine', target: 'commodities', strength: 0.6, delay: 1000, type: 'negative' },
-        { source: 'energy', target: 'oil', strength: 0.8, delay: 300, type: 'positive' },
-        { source: 'energy', target: 'gas', strength: 0.9, delay: 200, type: 'positive' },
-        { source: 'commodities', target: 'wheat', strength: 0.7, delay: 400, type: 'positive' },
-        { source: 'defense', target: 'gold', strength: 0.5, delay: 600, type: 'positive' },
-    ];
+        const fetchCausalData = async () => {
+            try {
+                // Fetch causal network data from backend API
+                const response = await fetch('/api/v1/globe/causal-network');
+                if (response.ok) {
+                    const data = await response.json();
+                    setNodes(data.nodes || []);
+                    setLinks(data.links || []);
+                } else {
+                    // If API not available, show empty state
+                    setNodes([]);
+                    setLinks([]);
+                }
+            } catch (error) {
+                console.error('Error fetching causal network data:', error);
+                setNodes([]);
+                setLinks([]);
+            }
+        };
+
+        fetchCausalData();
+    }, [isVisible]);
 
     // Animation sequence
     useEffect(() => {

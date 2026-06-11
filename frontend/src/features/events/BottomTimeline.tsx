@@ -1,7 +1,6 @@
 import { Panel } from '@/shared/ui/Panel'
 import { AlertCircle, AlertOctagon, Info } from 'lucide-react'
 import { useEvents } from '@/shared/api/hooks'
-import { fallbackEvents } from '@/shared/api/mockData'
 
 function EventMarker({ event }: { event: any }) {
     const severity = event.severity_score ?? event.magnitude ?? 0
@@ -33,7 +32,7 @@ function EventMarker({ event }: { event: any }) {
 
 export function BottomTimeline({ gti }: { gti: any }) {
     const { data: eventsData } = useEvents()
-    const events = eventsData?.events ?? fallbackEvents
+    const events = eventsData?.events ?? []
 
     const gtiValues = [40, 45, 42, 50, 65, 78, 80, 75, 72, 70, 75, gti?.gti_value ?? 71]
 
