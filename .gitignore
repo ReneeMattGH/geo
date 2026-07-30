@@ -1,0 +1,16 @@
+.venv
+.venv*
+__pycache__/
+*.pyc
+node_modules/
+.pytest_cache/
+model_artifacts/
+frontend.zip
+# Environment files - block actual .env but allow example template
+.env
+.env.local
+.env.production
+!.env.example
+
+.DS_Store
+prompts.txt

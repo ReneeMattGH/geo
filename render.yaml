@@ -1,0 +1,155 @@
+services:
+  # ── FastAPI Backend ───────────────────────────────────────────────────────────
+  - type: web
+    name: geotrade-api
+    runtime: docker
+    dockerfilePath: infra/docker/Dockerfile
+    dockerContext: .
+    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    plan: starter          # upgrade to standard for more RAM (ML models need ~1 GB)
+    region: oregon
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: geotrade-db
+          property: connectionString
+      - key: DATABASE_SYNC_URL
+        fromDatabase:
+          name: geotrade-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: geotrade-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: geotrade-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: geotrade-redis
+          property: connectionString
+      - key: ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      # ── add secret env vars in the Render dashboard ──
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY_2
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: TWELVEDATA_API_KEY
+        sync: false
+      - key: NEWSAPI_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
+      - key: ALPHAVANTAGE_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false   # set to your Vercel URL e.g. https://geotrade.vercel.app
+
+  # ── Celery Worker ─────────────────────────────────────────────────────────────
+  - type: worker
+    name: geotrade-worker
+    runtime: docker
+    dockerfilePath: infra/docker/Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q ingestion,nlp,gti,default
+    plan: starter
+    region: oregon
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: geotrade-db
+          property: connectionString
+      - key: DATABASE_SYNC_URL
+        fromDatabase:
+          name: geotrade-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: geotrade-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: geotrade-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: geotrade-redis
+          property: connectionString
+      - key: ENV
+        value: production
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY_2
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: TWELVEDATA_API_KEY
+        sync: false
+      - key: NEWSAPI_KEY
+        sync: false
+
+  # ── Celery Beat Scheduler ─────────────────────────────────────────────────────
+  - type: worker
+    name: geotrade-beat
+    runtime: docker
+    dockerfilePath: infra/docker/Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A app.tasks.celery_app beat --loglevel=info
+    plan: starter
+    region: oregon
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: geotrade-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: geotrade-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: geotrade-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: geotrade-redis
+          property: connectionString
+      - key: ENV
+        value: production
+
+databases:
+  # ── TimescaleDB ───────────────────────────────────────────────────────────────
+  # Note: Render does not natively support TimescaleDB.
+  # Use the free tier of Neon (https://neon.tech) or Supabase for Postgres,
+  # or provision a custom Docker-based Postgres on Render.
+  - name: geotrade-db
+    databaseName: geotrade
+    user: geotrade
+    plan: free            # upgrade for persistence beyond 90 days
+
+  # ── Redis ─────────────────────────────────────────────────────────────────────
+  - name: geotrade-redis
+    plan: free
