@@ -10,6 +10,8 @@ from app.services.market.coingecko_provider import CoinGeckoProvider, get_coinge
 from app.services.market.forex_provider import ForexProvider, get_forex_provider
 from app.services.market.commodities_provider import CommoditiesProvider, get_commodities_provider
 from app.services.market.fred_provider import FREDProvider, get_fred_provider
+from app.services.market.yahoo_provider import YahooProvider, get_yahoo_provider
+from app.services.market.finnhub_provider import FinnhubProvider, get_finnhub_provider
 from app.services.market.demo_provider import DemoProvider, get_demo_provider
 from app.services.market.market_service import (
     UnifiedMarketService,
@@ -21,6 +23,8 @@ from app.services.market.market_service import (
     get_forex,
     get_commodities,
     get_bonds,
+    get_etfs,
+    get_indices,
 )
 from app.services.market.ws_broadcaster import (
     MarketDataBroadcaster,
@@ -39,12 +43,16 @@ __all__ = [
     "ForexProvider",
     "CommoditiesProvider",
     "FREDProvider",
+    "YahooProvider",
+    "FinnhubProvider",
     "DemoProvider",
     "get_alpaca_provider",
     "get_coingecko_provider",
     "get_forex_provider",
     "get_commodities_provider",
     "get_fred_provider",
+    "get_yahoo_provider",
+    "get_finnhub_provider",
     "get_demo_provider",
     # Service
     "UnifiedMarketService",
@@ -56,6 +64,8 @@ __all__ = [
     "get_forex",
     "get_commodities",
     "get_bonds",
+    "get_etfs",
+    "get_indices",
     # WebSocket
     "MarketDataBroadcaster",
     "get_market_broadcaster",

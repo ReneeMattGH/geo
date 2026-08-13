@@ -1,5 +1,5 @@
 import { GTIResponseSchema, SignalsResponseSchema, EventsResponseSchema, type GTIResponse, type SignalsResponse, type EventsResponse } from './schemas'
-import { fallbackGTI, fallbackSignals, fallbackEvents, fallbackGlobeCountries, fallbackEnhancedSignals, fallbackMarketImpact } from './mockData'
+import { fallbackGTI, fallbackEvents, fallbackGlobeCountries, fallbackMarketImpact } from './mockData'
 
 // Fallback for production when VITE_API_URL isn't available at build (e.g. Vercel env not passed)
 const RENDER_API = 'https://geotrade-8pei.onrender.com/api/v1'
@@ -58,7 +58,7 @@ export const api = {
     getSignals: async (): Promise<SignalsResponse> => {
         // Primary: richer event-aware signal engine (v2)
         try {
-            const res = await fetch(`${API_BASE}/signals/v2/all?limit=80`, { signal: AbortSignal.timeout(10000) })
+            const res = await fetch(`${API_BASE}/signals/v2/all?limit=500`, { signal: AbortSignal.timeout(20000) })
             if (res.ok) {
                 const json = await res.json()
                 if (Array.isArray(json?.signals) && json.signals.length > 0) {
@@ -72,17 +72,17 @@ export const api = {
         // Secondary: legacy model endpoint
         try {
             const res = await fetch(`${API_BASE}/signals/assets`, { signal: AbortSignal.timeout(5000) })
-            if (!res.ok) return { signals: fallbackSignals }
+            if (!res.ok) return { signals: [] }
             const json = await res.json()
             const normalized = {
                 ...json,
                 signals: Array.isArray(json?.signals) ? json.signals.map(mapSignalsAssetsToLegacy) : [],
             }
             const parsed = SignalsResponseSchema.safeParse(normalized)
-            if (!parsed.success) return { signals: fallbackSignals }
+            if (!parsed.success) return { signals: [] }
             return parsed.data
         } catch {
-            return { signals: fallbackSignals }
+            return { signals: [] }
         }
     },
 
@@ -125,10 +125,10 @@ export const api = {
                 ? `${API_BASE}/signals/enhanced?region=${encodeURIComponent(region)}`
                 : `${API_BASE}/signals/enhanced`
             const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
-            if (!res.ok) return fallbackEnhancedSignals
+            if (!res.ok) return { signals: [] }
             return res.json()
         } catch {
-            return fallbackEnhancedSignals
+            return { signals: [] }
         }
     },
 
@@ -235,7 +235,19 @@ export const api = {
 
     getAllMarkets: async (): Promise<any> => {
         try {
-            const res = await fetch(`${API_BASE}/market/markets/all`, { signal: AbortSignal.timeout(15000) })
+            const res = await fetch(`${API_BASE}/market/markets/all`, { signal: AbortSignal.timeout(25000) })
+            if (!res.ok) return null
+            return res.json()
+        } catch {
+            return null
+        }
+    },
+
+    getMarketsByClass: async (assetClass: string): Promise<any> => {
+        try {
+            const normalized = assetClass.toLowerCase()
+            const path = normalized === 'all' ? 'all' : encodeURIComponent(normalized)
+            const res = await fetch(`${API_BASE}/market/markets/${path}`, { signal: AbortSignal.timeout(20000) })
             if (!res.ok) return null
             return res.json()
         } catch {

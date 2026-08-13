@@ -53,6 +53,33 @@ SYMBOL_MAP: Dict[str, str] = {
     "tron": "TRX",
     "near": "NEAR",
     "aptos": "APT",
+    "maker": "MKR",
+    "internet-computer": "ICP",
+    "hedera-hashgraph": "HBAR",
+    "sandbox": "SAND",
+    "decentraland": "MANA",
+    "theta-token": "THETA",
+    "eos": "EOS",
+    "flow": "FLOW",
+    "tezos": "XTZ",
+    "kucoin-shares": "KCS",
+    "synthetix": "SNX",
+    "basic-attention-token": "BAT",
+    "quant-network": "QNT",
+    "the-graph": "GRT",
+    "fantom": "FTM",
+    "elrond": "EGLD",
+    "zcash": "ZEC",
+    "neo": "NEO",
+    "klay-token": "KLAY",
+    "iota": "IOTA",
+    "curve-dao-token": "CRV",
+    "enjincoin": "ENJ",
+    "chiliz": "CHZ",
+    "loopring": "LRC",
+    "1inch": "1INCH",
+    "pancakeswap-token": "CAKE",
+    "axie-infinity": "AXS",
 }
 
 
@@ -67,7 +94,7 @@ class CoinGeckoProvider(BaseMarketProvider):
         self.settings = get_settings()
         self.base_url = self.settings.coingecko_base_url
         self.is_configured = True  # CoinGecko doesn't require API key for basic usage
-        self._cache_ttl_seconds = 300  # Cache for 5 minutes to avoid rate limits (free tier is very strict)
+        self._cache_ttl_seconds = 60
     
     async def fetch_prices(self, symbols: List[str]) -> List[MarketDataPoint]:
         """Fetch crypto prices from CoinGecko.
@@ -93,21 +120,11 @@ class CoinGeckoProvider(BaseMarketProvider):
         results = []
 
         try:
-            # Convert symbols to CoinGecko IDs if needed
-            cg_ids = self._to_coingecko_ids(symbols)
-
-            # CoinGecko API has rate limits, fetch in batches of 5 with delay to avoid 429 errors
-            batch_size = 5
-            for i in range(0, len(cg_ids), batch_size):
-                batch = cg_ids[i:i + batch_size]
-                logger.info(f"[CoinGecko] Fetching batch {i//batch_size + 1}: {len(batch)} IDs")
-                batch_results = await self._fetch_batch(batch)
-                results.extend(batch_results)
-                # Add delay between batches to avoid rate limiting
-                if i + batch_size < len(cg_ids):
-                    logger.info(f"[CoinGecko] Waiting 2 seconds before next batch...")
-                    import asyncio
-                    await asyncio.sleep(2)
+            if self._is_default_request(symbols):
+                results = await self._fetch_top_markets(limit=min(len(symbols), 50))
+            else:
+                cg_ids = self._to_coingecko_ids(symbols)
+                results = await self._fetch_batch(cg_ids)
 
         except Exception as e:
             logger.error(f"Error fetching crypto prices from CoinGecko: {e}")
@@ -181,6 +198,41 @@ class CoinGeckoProvider(BaseMarketProvider):
         
         logger.info(f"[CoinGecko] Batch complete: {len(results)} results from {len(cg_ids)} requested")
         return results
+
+    async def _fetch_top_markets(self, limit: int = 50) -> List[MarketDataPoint]:
+        """Fetch the current top crypto assets by market cap from CoinGecko."""
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{self.base_url}/coins/markets",
+                    params={
+                        "vs_currency": "usd",
+                        "order": "market_cap_desc",
+                        "per_page": limit,
+                        "page": 1,
+                        "sparkline": "false",
+                        "price_change_percentage": "24h",
+                    },
+                )
+
+                if resp.status_code == 429:
+                    logger.warning("CoinGecko rate limit hit while fetching top markets")
+                    cached_results = self.get_all_cached()
+                    return cached_results if cached_results else [
+                        MarketDataPoint.unavailable(sym, "crypto", self.name)
+                        for sym in self.get_default_symbols()
+                    ]
+
+                resp.raise_for_status()
+                data = resp.json()
+                return [dp for coin in data if (dp := self._parse_coin(coin))]
+        except Exception as e:
+            logger.error(f"Error fetching top crypto markets from CoinGecko: {e}")
+            cached_results = self.get_all_cached()
+            return cached_results if cached_results else [
+                MarketDataPoint.unavailable(sym, "crypto", self.name)
+                for sym in self.get_default_symbols()
+            ]
     
     def _parse_coin(self, coin: dict) -> Optional[MarketDataPoint]:
         """Parse CoinGecko coin data into MarketDataPoint."""
@@ -216,7 +268,9 @@ class CoinGeckoProvider(BaseMarketProvider):
                 volume=float(coin.get("total_volume", 0) or 0),
                 high_24h=float(coin.get("high_24h", 0) or 0),
                 low_24h=float(coin.get("low_24h", 0) or 0),
-                open_24h=0.0,  # CoinGecko doesn't provide open price directly
+                open_24h=0.0,
+                name=coin.get("name", display_symbol),
+                market_cap=float(coin.get("market_cap", 0) or 0),
             )
         except Exception as e:
             logger.error(f"Error parsing coin data: {e}")
@@ -247,12 +301,17 @@ class CoinGeckoProvider(BaseMarketProvider):
     
     def get_default_symbols(self) -> List[str]:
         """Return default cryptocurrency symbols."""
-        # Return display symbols - limited to top 5 to avoid CoinGecko rate limits
-        return [SYMBOL_MAP.get(cg_id, cg_id.upper()) for cg_id in DEFAULT_CRYPTO[:5]]
+        return [SYMBOL_MAP.get(cg_id, cg_id.upper()) for cg_id in DEFAULT_CRYPTO[:50]]
     
     def get_crypto_symbols(self) -> List[str]:
         """Return crypto symbols - alias for get_default_symbols."""
         return self.get_default_symbols()
+
+    def _is_default_request(self, symbols: List[str]) -> bool:
+        """Detect the service's default top-market request."""
+        requested = [s.upper() for s in symbols]
+        default = self.get_default_symbols()
+        return requested == default[: len(requested)]
 
 
 # Singleton factory

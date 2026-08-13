@@ -17,22 +17,27 @@ logger = get_logger(__name__)
 @dataclass
 class MarketDataPoint:
     """Unified market data format for all asset classes.
-    
+
     All providers must return data in this format.
     """
     symbol: str
-    asset_class: str  # "stocks", "crypto", "forex", "commodities"
+    asset_class: str  # "stocks", "crypto", "forex", "commodities", "bonds", "etfs", "indices"
     price: float
     change: float  # 24h change as percentage
     timestamp: int  # Unix timestamp in milliseconds
     source: str  # Provider name
-    
+
     # Optional fields
     volume: float = 0.0
     high_24h: float = 0.0
     low_24h: float = 0.0
     open_24h: float = 0.0
-    
+    name: str = ""
+    status: str = "ok"
+    currency: str = "USD"
+    market_cap: float = 0.0
+    data_status: str = "live"  # "live", "delayed", "stale", "unavailable"
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -46,8 +51,13 @@ class MarketDataPoint:
             "high_24h": self.high_24h,
             "low_24h": self.low_24h,
             "open_24h": self.open_24h,
+            "name": self.name or self.symbol,
+            "status": self.status,
+            "currency": self.currency,
+            "market_cap": self.market_cap,
+            "data_status": self.data_status,
         }
-    
+
     @classmethod
     def unavailable(cls, symbol: str, asset_class: str, source: str) -> "MarketDataPoint":
         """Create an unavailable data point."""
@@ -58,6 +68,9 @@ class MarketDataPoint:
             change=0.0,
             timestamp=int(datetime.now(UTC).timestamp() * 1000),
             source=source,
+            name=symbol,
+            status="unavailable",
+            data_status="unavailable",
         )
 
 

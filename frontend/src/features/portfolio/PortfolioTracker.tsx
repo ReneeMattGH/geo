@@ -15,20 +15,22 @@ import {
     Search, Filter, ArrowUpDown, PieChart,
     RefreshCw, AlertCircle, X
 } from 'lucide-react'
-import { useAllMarkets } from '@/shared/api/hooks'
+import { useMarketsByClass } from '@/shared/api/hooks'
+import { formatPrice, formatChange, formatVolume, sourceLabel, isPriced, dataStatusLabel, dataStatusColor } from '@/shared/api/marketFormat'
 
 interface MarketAsset {
     symbol: string
     name?: string
     price: number
     change: number
-    change_percent?: number
     asset_class: string
     source?: string
     volume?: number
     high_24h?: number
     low_24h?: number
     open_24h?: number
+    timestamp?: number
+    data_status?: string
 }
 
 interface PortfolioHolding {
@@ -64,8 +66,6 @@ const CATEGORY_LABELS: Record<string, string> = {
 }
 
 export function PortfolioTracker() {
-    const { data: marketsData, isLoading, error, refetch } = useAllMarkets()
-    
     // Portfolio state
     const [portfolio, setPortfolio] = useState<PortfolioHolding[]>([])
     
@@ -74,38 +74,58 @@ export function PortfolioTracker() {
     const [selectedCategory, setSelectedCategory] = useState<FilterCategory>('all')
     const [sortBy, setSortBy] = useState<SortOption>('symbol')
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
+    const { data: marketsData, isLoading, error, refetch } = useMarketsByClass(selectedCategory)
     
-    // Flatten all market assets into a single array
-    const allAssets = useMemo(() => {
-        if (!marketsData?.data) return []
-        
+    // Flatten every asset class the API returned into a single array.
+    // `unavailable` rows are counted separately rather than dropped silently, so
+    // a provider outage is visible instead of looking like a shorter universe.
+    const { allAssets, unavailableCount } = useMemo(() => {
+        if (!marketsData?.data) return { allAssets: [] as MarketAsset[], unavailableCount: 0 }
+
         const assets: MarketAsset[] = []
+        let unavailable = 0
         const categories = ['stocks', 'crypto', 'forex', 'commodities', 'bonds', 'etfs', 'indices'] as const
-        
+        // `/markets/all` returns an object keyed by class; `/markets/{class}` returns an array.
+        const isSingleMarket = Array.isArray(marketsData.data)
+        const marketData: Record<string, any[]> = isSingleMarket
+            ? { [marketsData.asset_class ?? selectedCategory]: marketsData.data }
+            : marketsData.data
+
         categories.forEach(category => {
-            const items = marketsData.data[category] || []
+            const items = marketData[category] || []
             items.forEach((item: any) => {
-                if (item.symbol && typeof item.price === 'number') {
-                    assets.push({
-                        symbol: item.symbol,
-                        name: item.name || item.symbol,
-                        price: item.price,
-                        change: item.change || 0,
-                        change_percent: item.change_percent,
-                        asset_class: category,
-                        source: item.source,
-                        volume: item.volume,
-                        high_24h: item.high_24h,
-                        low_24h: item.low_24h,
-                        open_24h: item.open_24h,
-                    })
+                if (!item?.symbol) return
+                if (!isPriced(item)) {
+                    unavailable += 1
+                    return
                 }
+                assets.push({
+                    symbol: item.symbol,
+                    name: item.name || item.symbol,
+                    price: item.price,
+                    change: typeof item.change === 'number' ? item.change : 0,
+                    asset_class: item.asset_class || category,
+                    source: item.source,
+                    volume: item.volume,
+                    high_24h: item.high_24h,
+                    low_24h: item.low_24h,
+                    open_24h: item.open_24h,
+                    timestamp: item.timestamp,
+                    data_status: item.data_status,
+                })
             })
         })
-        
-        return assets
-    }, [marketsData])
-    
+
+        return { allAssets: assets, unavailableCount: unavailable }
+    }, [marketsData, selectedCategory])
+
+    // Per-class counts for the filter chips
+    const countsByCategory = useMemo(() => {
+        const counts: Record<string, number> = {}
+        allAssets.forEach(a => { counts[a.asset_class] = (counts[a.asset_class] || 0) + 1 })
+        return counts
+    }, [allAssets])
+
     // Filter and sort assets
     const filteredAssets = useMemo(() => {
         let filtered = allAssets
@@ -124,8 +144,8 @@ export function PortfolioTracker() {
             )
         }
         
-        // Sorting
-        filtered.sort((a, b) => {
+        // Sorting (copy first — `filtered` may still alias the memoized array)
+        filtered = [...filtered].sort((a, b) => {
             let comparison = 0
             switch (sortBy) {
                 case 'symbol':
@@ -135,7 +155,7 @@ export function PortfolioTracker() {
                     comparison = a.price - b.price
                     break
                 case 'change':
-                    comparison = (a.change_percent || a.change) - (b.change_percent || b.change)
+                    comparison = a.change - b.change
                     break
                 case 'category':
                     comparison = a.asset_class.localeCompare(b.asset_class)
@@ -264,7 +284,15 @@ export function PortfolioTracker() {
                     <Briefcase className="w-5 h-5 text-purple-400" />
                     <h1 className="text-sm font-bold tracking-widest text-white uppercase">Portfolio Tracker</h1>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-gray-500 font-mono">
+                        {allAssets.length} live assets
+                        {unavailableCount > 0 && (
+                            <span className="text-amber-500/80" title="Symbols the upstream providers could not price right now">
+                                {' '}· {unavailableCount} unavailable
+                            </span>
+                        )}
+                    </span>
                     <button
                         onClick={() => refetch()}
                         className="p-2 rounded-lg bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all"
@@ -304,19 +332,23 @@ export function PortfolioTracker() {
                         {/* Category Filters */}
                         <div className="flex items-center gap-2 flex-wrap">
                             <Filter className="w-4 h-4 text-gray-500" />
-                            {(['all', 'stocks', 'crypto', 'forex', 'commodities', 'bonds', 'etfs', 'indices'] as FilterCategory[]).map(category => (
-                                <button
-                                    key={category}
-                                    onClick={() => setSelectedCategory(category)}
-                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-semibold border transition-all ${
-                                        selectedCategory === category
-                                            ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
-                                            : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
-                                    }`}
-                                >
-                                    {category === 'all' ? 'All' : CATEGORY_LABELS[category]}
-                                </button>
-                            ))}
+                            {(['all', 'stocks', 'crypto', 'forex', 'commodities', 'bonds', 'etfs', 'indices'] as FilterCategory[]).map(category => {
+                                const count = category === 'all' ? allAssets.length : countsByCategory[category]
+                                return (
+                                    <button
+                                        key={category}
+                                        onClick={() => setSelectedCategory(category)}
+                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-semibold border transition-all ${
+                                            selectedCategory === category
+                                                ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                                                : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
+                                        }`}
+                                    >
+                                        {category === 'all' ? 'All' : CATEGORY_LABELS[category]}
+                                        {count ? <span className="ml-1 opacity-60">{count}</span> : null}
+                                    </button>
+                                )
+                            })}
                         </div>
                         
                         {/* Sort Options */}
@@ -368,7 +400,7 @@ export function PortfolioTracker() {
                                             className="flex items-center justify-between p-3 rounded-lg bg-[#07091a]/60 border border-white/5 hover:border-white/20 hover:bg-white/5 transition-all group"
                                         >
                                             <div className="flex items-center gap-3 min-w-0 flex-1">
-                                                <div className="flex-shrink-0">
+                                                <div className="flex-shrink-0 min-w-0">
                                                     <span className="text-white font-bold text-xs">{asset.symbol}</span>
                                                     {asset.name && asset.name !== asset.symbol && (
                                                         <span className="text-gray-500 text-[10px] ml-1">{asset.name}</span>
@@ -377,12 +409,29 @@ export function PortfolioTracker() {
                                                 <span className={`px-2 py-0.5 rounded text-[9px] font-semibold border ${CATEGORY_COLORS[asset.asset_class]}`}>
                                                     {CATEGORY_LABELS[asset.asset_class] || asset.asset_class}
                                                 </span>
+                                                {asset.source && (
+                                                    <span className="hidden lg:inline text-[9px] text-gray-600" title={`Priced by ${asset.source}`}>
+                                                        {sourceLabel(asset.source)}
+                                                    </span>
+                                                )}
+                                                {asset.data_status && asset.data_status !== 'live' && (
+                                                    <span className={`hidden lg:inline text-[8px] font-semibold ${dataStatusColor(asset.data_status)}`}>
+                                                        {dataStatusLabel(asset.data_status)}
+                                                    </span>
+                                                )}
+                                                {formatVolume(asset.volume) && (
+                                                    <span className="hidden xl:inline text-[9px] text-gray-600">
+                                                        vol {formatVolume(asset.volume)}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="flex items-center gap-3 flex-shrink-0">
                                                 <div className="text-right">
-                                                    <p className="text-white font-mono text-xs">${asset.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                                                    <p className={`text-[10px] font-mono ${(asset.change_percent || asset.change) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                        {(asset.change_percent || asset.change) >= 0 ? '+' : ''}{((asset.change_percent || asset.change) * 100).toFixed(2)}%
+                                                    <p className="text-white font-mono text-xs">
+                                                        {formatPrice(asset.price, asset.asset_class)}
+                                                    </p>
+                                                    <p className={`text-[10px] font-mono ${asset.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                        {formatChange(asset.change)}
                                                     </p>
                                                 </div>
                                                 <button
@@ -506,11 +555,11 @@ export function PortfolioTracker() {
                                                     </div>
                                                     <div>
                                                         <p className="text-gray-500">Avg Price</p>
-                                                        <p className="text-white font-mono">${holding.avg_price.toFixed(2)}</p>
+                                                        <p className="text-white font-mono">{formatPrice(holding.avg_price, holding.asset_class)}</p>
                                                     </div>
                                                     <div>
                                                         <p className="text-gray-500">Current Price</p>
-                                                        <p className="text-white font-mono">${holding.current_price.toFixed(2)}</p>
+                                                        <p className="text-white font-mono">{formatPrice(holding.current_price, holding.asset_class)}</p>
                                                     </div>
                                                     <div>
                                                         <p className="text-gray-500">Total Value</p>

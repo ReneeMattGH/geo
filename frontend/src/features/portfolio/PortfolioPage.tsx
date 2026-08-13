@@ -15,20 +15,26 @@ import {
     RefreshCw, CheckCircle2, TrendingUp, TrendingDown, Minus, Info,
 } from 'lucide-react'
 import { cn } from '@/shared/ui/Panel'
-import { useCart, useSaveCart, usePortfolioRisk, useAllMarkets } from '@/shared/api/hooks'
+import { useCart, useSaveCart, usePortfolioRisk, useMarketsByClass } from '@/shared/api/hooks'
+import { formatPrice, formatChange, isPriced } from '@/shared/api/marketFormat'
 import type { CartHolding } from '@/shared/state/store'
 
+const MARKET_CATEGORIES = ['stocks', 'crypto', 'forex', 'commodities', 'bonds', 'etfs', 'indices'] as const
+
 // ── Transform market data to CartHolding format ─────────────────────────
-function transformMarketDataToHoldings(marketData: any): CartHolding[] {
+function transformMarketDataToHoldings(marketData: any, selectedMarket = 'all'): CartHolding[] {
     if (!marketData?.data) return []
 
     const holdings: CartHolding[] = []
-    const marketCategories = ['stocks', 'crypto', 'forex', 'commodities', 'bonds']
+    // `/markets/all` returns an object keyed by class; `/markets/{class}` an array.
+    const dataByMarket = Array.isArray(marketData.data)
+        ? { [marketData.asset_class ?? selectedMarket]: marketData.data }
+        : marketData.data
 
-    marketCategories.forEach(category => {
-        const items = marketData.data[category] || []
+    MARKET_CATEGORIES.forEach(category => {
+        const items = dataByMarket[category] || []
         items.forEach((item: any) => {
-            if (item.symbol) {
+            if (item.symbol && isPriced(item)) {
                 holdings.push({
                     symbol: item.symbol,
                     label: item.name || item.symbol,
@@ -37,7 +43,7 @@ function transformMarketDataToHoldings(marketData: any): CartHolding[] {
                     region: item.region || 'global',
                     price: item.price,
                     change: item.change,
-                    asset_class: category,
+                    asset_class: item.asset_class || category,
                 })
             }
         })
@@ -69,12 +75,12 @@ export function PortfolioPage({ email }: PortfolioPageProps) {
     const { data: cartData, isLoading: cartLoading } = useCart(email)
     const saveCart = useSaveCart(email)
     const riskMutation = usePortfolioRisk()
-    const { data: marketsData, isLoading: marketsLoading } = useAllMarkets()
 
     const [holdings, setHoldings] = useState<CartHolding[]>([])
     const [saved, setSaved] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedMarket, setSelectedMarket] = useState<string>('all')
+    const { data: marketsData, isLoading: marketsLoading } = useMarketsByClass(selectedMarket)
 
     // Hydrate holdings from backend on first load
     useEffect(() => {
@@ -113,11 +119,8 @@ export function PortfolioPage({ email }: PortfolioPageProps) {
 
     // Transform market data to holdings format
     const assetUniverse = useMemo(() => {
-        console.log('Raw marketsData:', marketsData)
-        const holdings = transformMarketDataToHoldings(marketsData)
-        console.log('Transformed holdings:', holdings.length, holdings.slice(0, 3))
-        return holdings
-    }, [marketsData])
+        return transformMarketDataToHoldings(marketsData, selectedMarket)
+    }, [marketsData, selectedMarket])
 
     const riskData = riskMutation.data
 
@@ -133,15 +136,12 @@ export function PortfolioPage({ email }: PortfolioPageProps) {
         })
     }, [assetUniverse, holdings, searchQuery, selectedMarket])
 
-    // Group filtered assets by market category
+    // Group filtered assets by market category — every class the API can return,
+    // so ETFs and indices are not silently dropped from the picker.
     const groupedAssets = useMemo(() => {
-        const groups: Record<string, CartHolding[]> = {
-            stocks: [],
-            crypto: [],
-            forex: [],
-            commodities: [],
-            bonds: [],
-        }
+        const groups: Record<string, CartHolding[]> = Object.fromEntries(
+            MARKET_CATEGORIES.map(c => [c, [] as CartHolding[]])
+        )
         filteredUniverse.forEach(asset => {
             const category = asset.asset_class || 'other'
             if (groups[category]) {
@@ -158,6 +158,8 @@ export function PortfolioPage({ email }: PortfolioPageProps) {
         { key: 'forex', label: 'Forex' },
         { key: 'commodities', label: 'Commodities' },
         { key: 'bonds', label: 'Bonds' },
+        { key: 'etfs', label: 'ETFs' },
+        { key: 'indices', label: 'Indices' },
     ]
 
     return (
@@ -378,14 +380,14 @@ export function PortfolioPage({ email }: PortfolioPageProps) {
                                                     {asset.price !== undefined && (
                                                         <span className="text-[11px] font-mono">
                                                             <span className={(asset.change ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
-                                                                ${asset.price.toFixed(2)}
+                                                                {formatPrice(asset.price, asset.asset_class ?? '')}
                                                             </span>
                                                             {asset.change !== undefined && (
                                                                 <span className={cn(
                                                                     'text-[9px] ml-1',
                                                                     asset.change >= 0 ? 'text-green-400' : 'text-red-400'
                                                                 )}>
-                                                                    {asset.change >= 0 ? '+' : ''}{asset.change.toFixed(2)}%
+                                                                    {formatChange(asset.change)}
                                                                 </span>
                                                             )}
                                                         </span>

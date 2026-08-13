@@ -83,6 +83,11 @@ class MarketDataBroadcaster:
     async def _broadcast_once(self) -> None:
         """Fetch and broadcast market data once."""
         try:
+            # Prewarm once at startup, then avoid burning provider quotas when
+            # nobody is listening to the market WebSocket channel.
+            if self._last_broadcast is not None and self.ws_manager.total_connections == 0:
+                return
+
             # Fetch all market data
             market_data = await self.market_service.get_all_markets()
             

@@ -241,19 +241,24 @@ _REQUEST_TIMEOUT    = 8.0   # seconds per request
 def _load_finnhub_keys() -> list[str]:
     """Load all configured Finnhub API keys (supports KEY + KEY_2 rotation)."""
     keys: list[str] = []
+    placeholder_prefixes = ("your_", "xxx", "placeholder", "change_me", "todo")
+
+    def usable(value: str) -> bool:
+        return bool(value) and not value.lower().startswith(placeholder_prefixes)
+
     try:
         from app.core.config import get_settings
         s = get_settings()
-        if s.finnhub_api_key:
+        if usable(s.finnhub_api_key):
             keys.append(s.finnhub_api_key)
-        if s.finnhub_api_key_2:
+        if usable(s.finnhub_api_key_2):
             keys.append(s.finnhub_api_key_2)
     except Exception:
         pass
     # Also check env vars directly (useful inside Docker before settings load)
     for env_var in ("FINNHUB_API_KEY", "FINNHUB_API_KEY_2"):
         v = os.environ.get(env_var, "")
-        if v and v not in keys:
+        if usable(v) and v not in keys:
             keys.append(v)
     return keys or [""]   # always return at least one slot
 
@@ -692,11 +697,11 @@ class MarketFeedManager:
         """Set the WebSocket manager for broadcasting price updates."""
         self._ws_mgr = ws_manager
 
-    async def _run_discovery_once(self) -> None:
+    async def _run_discovery_once(self, force_refresh: bool = False) -> None:
         """Run asset discovery once."""
         try:
             logger.info("running_dynamic_asset_discovery")
-            universe = await self.discovery_svc.get_asset_universe(force_refresh=True)
+            universe = await self.discovery_svc.get_asset_universe(force_refresh=force_refresh)
             
             new_symbols = []
             for market in universe.values():
@@ -712,8 +717,8 @@ class MarketFeedManager:
     async def _discovery_loop(self) -> None:
         """Periodically refresh the asset universe."""
         while True:
-            await self._run_discovery_once()
             await asyncio.sleep(self.discovery_interval)
+            await self._run_discovery_once(force_refresh=True)
 
     async def start(self) -> None:
         """Start the background polling and discovery loops."""
@@ -723,7 +728,7 @@ class MarketFeedManager:
         # Run initial discovery once to populate symbols before starting the poll
         await self._run_discovery_once()
 
-        self._poll_task = asyncio.create_task(self._polling_loop(), name="market_feed_poll_loop")
+        self._poll_task = asyncio.create_task(self._loop(), name="market_feed_poll_loop")
         self._discovery_task = asyncio.create_task(self._discovery_loop(), name="market_feed_discovery_loop")
         logger.info(
             "market_feed_manager_started",
@@ -782,6 +787,9 @@ class MarketFeedManager:
     async def _poll_once(self) -> None:
         """Single poll using the centralized MarketEngine."""
         try:
+            # Local import avoids the module cycle: market_engine imports MarketTick.
+            from app.services.market_engine import get_market_engine
+
             engine = get_market_engine()
             # Fetch from all services concurrently via engine's services
             tasks = [
