@@ -1,10 +1,12 @@
 """Commodities market data provider.
 
 Fetches real-time prices for Gold, Silver, Oil and other commodities.
-Uses Twelve Data API or Alpha Vantage as fallback.
+Twelve Data quotes the spot metals; the rest are priced by the unified
+service's futures fallback (see TWELVEDATA_SUPPORTED).
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, UTC
 from typing import List, Optional
 
@@ -18,61 +20,138 @@ logger = get_logger(__name__)
 
 # Major commodities to track
 DEFAULT_COMMODITIES = [
-    "XAU/USD",  # Gold
-    "XAG/USD",  # Silver
-    "WTI",      # West Texas Intermediate Oil
-    "BRENT",    # Brent Crude Oil
-    "NATGAS",   # Natural Gas
+    "XAUUSD",      # Gold
+    "XAGUSD",      # Silver
+    "PLATINUM",    # Platinum
+    "PALLADIUM",   # Palladium
+    "COPPER",      # Copper
+    "WTI",         # West Texas Intermediate Oil
+    "BRENT",       # Brent Crude Oil
+    "NATGAS",      # Natural Gas
+    "HEATINGOIL",  # Heating Oil
+    "CORN",
+    "WHEAT",
+    "SOYBEANS",
+    "COFFEE",
+    "SUGAR",
+    "COTTON",
+    "COCOA",
+    "ORANGEJUICE",
+    "LEANHOGS",
+    "LIVECATTLE",
+    "FEEDERCATTLE",
+    "OATS",
+    "ROUGH_RICE",
+    "SOYMEAL",
+    "SOYOIL",
+    "LUMBER",
 ]
 
-# Symbol mapping for different APIs
+# Twelve Data only quotes the spot metals reliably. Its plain futures tickers
+# resolve to unrelated equities on some plans (e.g. "WTI" is W&T Offshore, a ~$3
+# stock, not crude oil), so everything else is sourced from the futures fallback.
+TWELVEDATA_SUPPORTED = {"XAUUSD", "XAGUSD", "PLATINUM", "PALLADIUM"}
+
+# Display symbol -> Twelve Data symbol (spot metals only)
 SYMBOL_MAP = {
-    "XAU/USD": {"twelvedata": "XAU/USD", "alphavantage": "GC=F"},
-    "XAG/USD": {"twelvedata": "XAG/USD", "alphavantage": "SI=F"},
-    "WTI": {"twelvedata": "WTI", "alphavantage": "CL=F"},
-    "BRENT": {"twelvedata": "BRENT", "alphavantage": "BZ=F"},
-    "NATGAS": {"twelvedata": "NATGAS", "alphavantage": "NG=F"},
+    "XAUUSD": "XAU/USD",
+    "XAGUSD": "XAG/USD",
+    "PLATINUM": "XPT/USD",
+    "PALLADIUM": "XPD/USD",
+}
+
+COMMODITY_NAMES = {
+    "XAUUSD": "Gold",
+    "XAGUSD": "Silver",
+    "PLATINUM": "Platinum",
+    "PALLADIUM": "Palladium",
+    "COPPER": "Copper",
+    "WTI": "WTI Crude Oil",
+    "BRENT": "Brent Crude Oil",
+    "NATGAS": "Natural Gas",
+    "HEATINGOIL": "Heating Oil",
+    "CORN": "Corn",
+    "WHEAT": "Wheat",
+    "SOYBEANS": "Soybeans",
+    "COFFEE": "Coffee",
+    "SUGAR": "Sugar",
+    "COTTON": "Cotton",
+    "COCOA": "Cocoa",
+    "ORANGEJUICE": "Orange Juice",
+    "LEANHOGS": "Lean Hogs",
+    "LIVECATTLE": "Live Cattle",
+    "FEEDERCATTLE": "Feeder Cattle",
+    "OATS": "Oats",
+    "ROUGH_RICE": "Rough Rice",
+    "SOYMEAL": "Soybean Meal",
+    "SOYOIL": "Soybean Oil",
+    "LUMBER": "Lumber",
 }
 
 
 class CommoditiesProvider(BaseMarketProvider):
     """Provider for commodities market data."""
-    
+
     name = "twelvedata"
     asset_class = "commodities"
-    
+
+    # Twelve Data's free tier has per-minute and daily credit limits. When the
+    # daily limit is hit, stop for a longer period and let Yahoo futures handle it.
+    RATE_LIMIT_COOLDOWN = 300.0
+    # Symbols per request once the free-tier limit has been observed. The window
+    # then rotates so the whole universe refreshes over consecutive cycles.
+    THROTTLED_BATCH_SIZE = 8
+
     def __init__(self) -> None:
         super().__init__()
         self.settings = get_settings()
         self.api_key = self.settings.twelvedata_api_key
-        self.backup_key = self.settings.alphavantage_api_key
-        
+
         self.base_url = "https://api.twelvedata.com"
-        self.backup_url = "https://www.alphavantage.co/query"
-        
-        if not self.api_key and not self.backup_key:
+        self._blocked_until = 0.0
+        # Set once the plan's per-minute credit limit has been hit.
+        self._batch_size: Optional[int] = None
+        self._rotation_offset = 0
+
+        if not self.api_key:
             logger.warning(
-                "No commodities API keys configured - commodities unavailable",
-                missing_keys=["TWELVEDATA_API_KEY", "ALPHAVANTAGE_API_KEY"]
+                "Twelve Data not configured - commodities rely on the futures fallback",
+                missing_key="TWELVEDATA_API_KEY",
             )
-    
+
     async def fetch_prices(self, symbols: List[str]) -> List[MarketDataPoint]:
         """Fetch commodity prices."""
-        # Try Twelve Data first
-        if self.api_key:
-            results = await self._fetch_from_twelvedata(symbols)
-            # Check if we got valid data, otherwise try backup
-            if not all(r.price > 0 for r in results):
-                logger.warning("Some commodities unavailable from Twelve Data, trying backup...")
-        
-        # Try Alpha Vantage as backup
-        if self.backup_key:
-            results = await self._fetch_from_alphavantage(symbols)
-        
-        # If no keys, return unavailable
-        if not self.api_key and not self.backup_key:
-            logger.warning("No API keys configured for commodities.")
+        results: List[MarketDataPoint] = []
+
+        quotable = [s for s in symbols if self._display_symbol(s) in TWELVEDATA_SUPPORTED]
+
+        if quotable and self.api_key and time.monotonic() >= self._blocked_until:
+            requested = self._next_window(quotable)
+            results = await self._fetch_from_twelvedata(requested)
+            # Symbols outside this window keep their most recent live reading.
+            results.extend(
+                cached
+                for sym in symbols
+                if sym not in requested
+                and (cached := self.get_cached(self._display_symbol(sym))) is not None
+                and cached.price > 0
+                and cached.status == "ok"
+            )
+
+        # Alpha Vantage is deliberately not used here: its GLOBAL_QUOTE endpoint
+        # returns an empty body for futures tickers (GC=F, CL=F, ...) and spends
+        # a slot from a 25-request daily quota doing it.
+
+        if not self.api_key:
+            logger.warning("No Twelve Data key configured for commodities.")
             return [MarketDataPoint.unavailable(sym, "commodities", self.name) for sym in symbols]
+
+        returned = {r.symbol for r in results}
+        results.extend(
+            MarketDataPoint.unavailable(self._display_symbol(sym), "commodities", self.name)
+            for sym in symbols
+            if self._display_symbol(sym) not in returned
+        )
         
         self._update_cache(results)
         return results
@@ -84,7 +163,7 @@ class CommoditiesProvider(BaseMarketProvider):
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 # Map to Twelve Data symbols
-                td_symbols = [SYMBOL_MAP.get(s, {}).get("twelvedata", s) for s in symbols]
+                td_symbols = [SYMBOL_MAP.get(self._display_symbol(s), s) for s in symbols]
                 sym_str = ",".join(td_symbols)
                 
                 url = f"{self.base_url}/quote"
@@ -100,16 +179,22 @@ class CommoditiesProvider(BaseMarketProvider):
                 
                 # Check for errors
                 if "status" in data and data["status"] == "error":
-                    logger.error(f"Twelve Data commodities error: {data.get('message')}")
+                    msg = data.get("message", "")
+                    logger.error(f"Twelve Data commodities error: {msg}")
+                    if data.get("code") == 429 or "run out" in msg.lower() or "credit" in msg.lower():
+                        self._enter_cooldown()
                     return [MarketDataPoint.unavailable(sym, "commodities", self.name) for sym in symbols]
                 
-                # Parse results
+                if len(symbols) == 1 and "symbol" in data:
+                    data = {td_symbols[0]: data}
+
                 for symbol in symbols:
-                    td_sym = SYMBOL_MAP.get(symbol, {}).get("twelvedata", symbol)
+                    display_symbol = self._display_symbol(symbol)
+                    td_sym = SYMBOL_MAP.get(display_symbol, symbol)
                     
                     if td_sym in data:
                         quote = data[td_sym]
-                        parsed = self._parse_twelvedata_quote(symbol, quote)
+                        parsed = self._parse_twelvedata_quote(display_symbol, quote)
                         if parsed:
                             results.append(parsed)
                         else:
@@ -117,10 +202,15 @@ class CommoditiesProvider(BaseMarketProvider):
                     else:
                         results.append(MarketDataPoint.unavailable(symbol, "commodities", self.name))
                         
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Twelve Data commodities HTTP error: {e.response.status_code}")
+            if e.response.status_code == 429:
+                self._enter_cooldown()
+            return [MarketDataPoint.unavailable(sym, "commodities", self.name) for sym in symbols]
         except Exception as e:
             logger.error(f"Error fetching commodities from Twelve Data: {e}")
             return [MarketDataPoint.unavailable(sym, "commodities", self.name) for sym in symbols]
-        
+
         return results
     
     def _parse_twelvedata_quote(self, symbol: str, quote: dict) -> Optional[MarketDataPoint]:
@@ -157,79 +247,52 @@ class CommoditiesProvider(BaseMarketProvider):
                 high_24h=float(quote.get("high", 0)),
                 low_24h=float(quote.get("low", 0)),
                 open_24h=float(quote.get("open", 0)),
+                name=COMMODITY_NAMES.get(symbol, symbol),
             )
         except Exception as e:
             logger.error(f"Error parsing commodity quote for {symbol}: {e}")
             return None
     
-    async def _fetch_from_alphavantage(self, symbols: List[str]) -> List[MarketDataPoint]:
-        """Fetch from Alpha Vantage as backup."""
-        results = []
-        
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                for symbol in symbols:
-                    av_sym = SYMBOL_MAP.get(symbol, {}).get("alphavantage", symbol)
-                    
-                    params = {
-                        "function": "GLOBAL_QUOTE",
-                        "symbol": av_sym,
-                        "apikey": self.backup_key
-                    }
-                    
-                    resp = await client.get(self.backup_url, params=params)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    
-                    if "Global Quote" in data:
-                        quote = data["Global Quote"]
-                        parsed = self._parse_alphavantage_quote(symbol, quote)
-                        if parsed:
-                            results.append(parsed)
-                        else:
-                            results.append(MarketDataPoint.unavailable(symbol, "commodities", self.name))
-                    else:
-                        results.append(MarketDataPoint.unavailable(symbol, "commodities", self.name))
-                        
-        except Exception as e:
-            logger.error(f"Error fetching commodities from Alpha Vantage: {e}")
-            # Fill remaining with unavailable
-            remaining = [sym for sym in symbols if sym not in [r.symbol for r in results]]
-            results.extend([MarketDataPoint.unavailable(sym, "commodities", "alphavantage") for sym in remaining])
-        
-        return results
-    
-    def _parse_alphavantage_quote(self, symbol: str, quote: dict) -> Optional[MarketDataPoint]:
-        """Parse Alpha Vantage Global Quote."""
-        try:
-            price = float(quote.get("05. price", 0))
-            if price == 0:
-                return None
-            
-            change_pct = quote.get("10. change percent", "0%")
-            change = float(change_pct.replace("%", "")) if change_pct else 0
-            
-            timestamp = int(datetime.now(UTC).timestamp() * 1000)
-            
-            return MarketDataPoint(
-                symbol=symbol,
-                asset_class="commodities",
-                price=price,
-                change=round(change, 4),
-                timestamp=timestamp,
-                source="alphavantage",
-                volume=float(quote.get("06. volume", 0)),
-                high_24h=float(quote.get("03. high", 0)),
-                low_24h=float(quote.get("04. low", 0)),
-                open_24h=float(quote.get("02. open", 0)),
-            )
-        except Exception as e:
-            logger.error(f"Error parsing Alpha Vantage quote for {symbol}: {e}")
-            return None
-    
     def get_default_symbols(self) -> List[str]:
         """Return default commodity symbols."""
         return DEFAULT_COMMODITIES.copy()
+
+    def _display_symbol(self, symbol: str) -> str:
+        """Normalize commodity display symbols."""
+        return symbol.replace("/", "").upper()
+
+    def _has_valid_price(self, results: List[MarketDataPoint], symbol: str) -> bool:
+        display = self._display_symbol(symbol)
+        return any(r.symbol == display and r.price > 0 and r.status == "ok" for r in results)
+
+    def _next_window(self, symbols: List[str]) -> List[str]:
+        """Pick the slice of symbols to price this cycle.
+
+        Full plans request everything at once. Once the free-tier credit limit
+        has been seen, requests shrink to a rotating window so the whole
+        universe still refreshes over a few cycles instead of always failing.
+        """
+        if self._batch_size is None or self._batch_size >= len(symbols):
+            return list(symbols)
+
+        size = self._batch_size
+        start = self._rotation_offset % len(symbols)
+        window = (symbols + symbols)[start:start + size]
+        self._rotation_offset = (start + size) % len(symbols)
+        return window
+
+    def _enter_cooldown(self) -> None:
+        """Pause Twelve Data calls until its rate-limit window rolls over."""
+        self._blocked_until = time.monotonic() + self.RATE_LIMIT_COOLDOWN
+        if self._batch_size is None:
+            self._batch_size = self.THROTTLED_BATCH_SIZE
+            logger.warning(
+                f"Twelve Data credit limit reached - switching commodities to "
+                f"rotating batches of {self._batch_size}"
+            )
+        logger.warning(
+            f"Twelve Data rate limited - pausing commodity calls for {self.RATE_LIMIT_COOLDOWN:.0f}s"
+        )
 
 
 # Singleton factory

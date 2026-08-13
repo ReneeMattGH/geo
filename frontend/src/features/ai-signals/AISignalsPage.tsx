@@ -5,6 +5,8 @@ import {
   ArrowUpRight, ArrowDownRight, Clock, Target, Shield,
   Zap, Globe, DollarSign, BarChart3, X
 } from 'lucide-react'
+import { formatPrice as formatMarketPrice } from '@/shared/api/marketFormat'
+import { API_BASE } from '@/shared/api/client'
 
 // Types
 interface Signal {
@@ -62,8 +64,12 @@ interface Signal {
   }>
   related_assets: string[]
   generated_at: string
-  price?: number
-  live_change_pct?: number
+  price?: number | null
+  live_change_pct?: number | null
+  quote_timestamp?: string
+  data_status?: string
+  data_source?: string
+  actionable?: boolean
 }
 
 interface MarketCategory {
@@ -84,7 +90,27 @@ const MARKET_CATEGORIES: MarketCategory[] = [
   { id: 'indices', name: 'Indices', icon: <Target className="w-4 h-4" />, color: '#ec4899' },
 ]
 
-// Helper function to map market data to Signal interface
+const CATEGORY_TO_ASSET_CLASS: Record<string, string> = {
+  crypto: 'crypto',
+  stocks: 'stock',
+  etfs: 'etf',
+  forex: 'forex',
+  commodities: 'commodity',
+  bonds: 'bond',
+  indices: 'equity_index',
+}
+
+function marketClassForSignal(assetClass: string): string {
+  return {
+    stock: 'stocks', commodity: 'commodities', equity_index: 'indices',
+    bond: 'bonds', etf: 'etfs', crypto: 'crypto', forex: 'forex',
+  }[assetClass] || assetClass
+}
+
+function displayPrice(signal: Signal, value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return 'Unavailable'
+  return formatMarketPrice(value, marketClassForSignal(signal.asset_class))
+}
 
 export function AISignalsPage() {
   const [signals, setSignals] = useState<Signal[]>([])
@@ -102,30 +128,31 @@ export function AISignalsPage() {
       setLoading(true)
       setError(null)
       
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
-      const response = await fetch(`${API_BASE}/signals/v2/all`)
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      const signalsResponse = await fetch(`${API_BASE}/signals/v2/all?limit=500`)
+
+      if (!signalsResponse.ok) {
+        throw new Error(`HTTP ${signalsResponse.status}: ${signalsResponse.statusText}`)
       }
-      
-      const data = await response.json()
-      
-      if (data && data.signals && Array.isArray(data.signals)) {
-        setSignals(data.signals)
-        if (!selectedSignal && data.signals.length > 0) {
-          setSelectedSignal(data.signals[0])
-        }
-      } else {
-        throw new Error('Invalid response format: expected signals array')
-      }
+      const signalData = await signalsResponse.json()
+      const directSignals: Signal[] = Array.isArray(signalData?.signals) ? signalData.signals as Signal[] : []
+      const mergedSignals = directSignals.sort((a, b) => {
+        const aPriced = typeof a.price === 'number' && a.price > 0 ? 1 : 0
+        const bPriced = typeof b.price === 'number' && b.price > 0 ? 1 : 0
+        if (aPriced !== bPriced) return bPriced - aPriced
+        return a.symbol.localeCompare(b.symbol)
+      })
+
+      setSignals(mergedSignals)
+      setSelectedSignal(previous => previous
+        ? mergedSignals.find(signal => signal.symbol === previous.symbol) ?? mergedSignals[0] ?? null
+        : mergedSignals[0] ?? null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch signals')
       console.error('Error fetching signals:', err)
     } finally {
       setLoading(false)
     }
-  }, [selectedSignal])
+  }, [])
 
   useEffect(() => {
     fetchSignals()
@@ -136,7 +163,9 @@ export function AISignalsPage() {
   // Filter and sort signals
   const filteredSignals = signals
     .filter(signal => {
-      const matchesCategory = selectedCategory === 'all' || signal.category === selectedCategory
+      const matchesCategory = selectedCategory === 'all' ||
+        signal.category === selectedCategory ||
+        signal.asset_class === CATEGORY_TO_ASSET_CLASS[selectedCategory]
       const matchesSearch = searchQuery === '' || 
         signal.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
         signal.label.toLowerCase().includes(searchQuery.toLowerCase())
@@ -295,7 +324,7 @@ export function AISignalsPage() {
                 <span>{filteredSignals.length} signals</span>
                 <span className="flex items-center gap-1">
                   <Activity className="w-3 h-3 text-[#00f2ff] animate-pulse" />
-                  Live
+                  Auto-refresh 10s
                 </span>
               </div>
             </div>
@@ -362,10 +391,13 @@ function SignalCard({ signal, isSelected, onClick }: { signal: Signal, isSelecte
           <p className="text-xs text-white/60 font-mono">{signal.label}</p>
         </div>
         <div className="text-right">
-          <p className="text-lg font-bold font-mono text-white">${price.toFixed(2)}</p>
+          <p className="text-lg font-bold font-mono text-white">{displayPrice(signal, price)}</p>
           <p className={`text-xs font-mono flex items-center justify-end gap-1 ${change >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
             {change >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
             {Math.abs(change).toFixed(2)}%
+          </p>
+          <p className="text-[9px] font-mono text-white/40 mt-1">
+            {(signal.data_status || 'unavailable').toUpperCase()} · {signal.data_source || 'unknown'}
           </p>
         </div>
       </div>
@@ -415,13 +447,16 @@ function SignalDetails({ signal }: { signal: Signal }) {
           <p className="text-white/40 font-mono text-sm mt-1">{signal.category} • {signal.region}</p>
         </div>
         <div className="text-right">
-          <p className="text-4xl font-bold font-mono text-white">${price.toFixed(2)}</p>
-          {signal.live_change_pct !== undefined && (
+          <p className="text-4xl font-bold font-mono text-white">{displayPrice(signal, price)}</p>
+          {signal.live_change_pct != null && (
             <p className={`text-lg font-mono flex items-center justify-end gap-1 ${signal.live_change_pct >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
               {signal.live_change_pct >= 0 ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
               {Math.abs(signal.live_change_pct).toFixed(2)}%
             </p>
           )}
+          <p className="text-xs font-mono text-white/40 mt-2">
+            {(signal.data_status || 'unavailable').toUpperCase()} · {signal.data_source || 'unknown'} · {new Date(signal.quote_timestamp || signal.generated_at).toLocaleString()}
+          </p>
         </div>
       </div>
 
@@ -432,10 +467,10 @@ function SignalDetails({ signal }: { signal: Signal }) {
           TRADE SETUP
         </h3>
         <div className="grid grid-cols-4 gap-4">
-          <TradeMetric label="Current Price" value={`$${signal.trade_setup.current_price.toFixed(2)}`} />
-          <TradeMetric label="Entry Price" value={`$${signal.trade_setup.entry_price.toFixed(2)}`} />
-          <TradeMetric label="Stop Loss" value={`$${signal.trade_setup.stop_loss.toFixed(2)}`} color="#ef4444" />
-          <TradeMetric label="Target Price" value={`$${signal.trade_setup.target_price.toFixed(2)}`} color="#22c55e" />
+          <TradeMetric label="Current Price" value={displayPrice(signal, signal.trade_setup.current_price)} />
+          <TradeMetric label="Entry Price" value={displayPrice(signal, signal.trade_setup.entry_price)} />
+          <TradeMetric label="Stop Loss" value={displayPrice(signal, signal.trade_setup.stop_loss)} color="#ef4444" />
+          <TradeMetric label="Target Price" value={displayPrice(signal, signal.trade_setup.target_price)} color="#22c55e" />
           <TradeMetric label="Risk/Reward" value={signal.trade_setup.risk_reward.toFixed(2)} />
           <TradeMetric label="ATR %" value={`${(signal.trade_setup.atr_pct * 100).toFixed(2)}%`} />
           <TradeMetric label="Max Position" value={`${(signal.trade_setup.max_position_pct * 100).toFixed(1)}%`} />

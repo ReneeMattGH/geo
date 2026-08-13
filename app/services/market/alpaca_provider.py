@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, UTC
 from typing import List, Optional
+from urllib.parse import urljoin
 
 import httpx
 
@@ -22,7 +23,16 @@ DEFAULT_STOCKS = [
     "V", "JPM", "WMT", "UNH", "MA", "XOM", "HD", "PG", "JNJ", "BAC",
     "COST", "ABBV", "NFLX", "KO", "CRM", "PEP", "TMO", "ADBE", "WFC", "CSCO",
     "MRK", "TMUS", "AMD", "ACN", "DIS", "ABT", "GE", "CAT", "VZ", "DHR",
-    "TXN", "NEE", "PM", "IBM", "AMGN", "UBER", "BMY", "PFE", "CMCSA", "COP"
+    "TXN", "NEE", "PM", "IBM", "AMGN", "UBER", "BMY", "PFE", "CMCSA", "COP",
+    "LMT", "RTX", "NOC", "GD", "CVX", "GS", "BA",
+]
+
+# Liquid ETFs used by the portfolio and market browser.
+DEFAULT_ETFS = [
+    "SPY", "QQQ", "DIA", "IWM", "VTI", "VOO", "VEA", "VWO", "EEM", "GLD",
+    "SLV", "TLT", "HYG", "LQD", "XLE", "XLF", "XLK", "XLV", "XLI", "ITA",
+    "XLP", "XLU", "XLB", "XLC", "XBI", "SMH", "SOXX", "ARKK", "VNQ", "IYR",
+    "EFA", "FXI", "KWEB", "EWJ", "EWG", "USO", "UNG",
 ]
 
 # Top 20 cryptocurrencies
@@ -46,18 +56,23 @@ class AlpacaProvider(BaseMarketProvider):
         self.api_secret = self.settings.alpaca_secret_key
         
         # Use configured URLs or defaults
-        self.base_url = self.settings.alpaca_data_url or "https://data.alpaca.markets/v2"
-        self.paper_url = "https://data.sandbox.alpaca.markets/v2"
+        self.base_url = self._normalize_data_url(
+            self.settings.alpaca_data_url or "https://data.alpaca.markets"
+        )
         
         # Check if properly configured
         self.is_configured = bool(self.api_key and self.api_secret)
         self.use_paper = not self.is_configured
         
         if not self.is_configured:
+            missing_fields = []
+            if not self.api_key:
+                missing_fields.append("ALPACA_API_KEY")
+            if not self.api_secret:
+                missing_fields.append("ALPACA_SECRET_KEY")
             logger.warning(
                 "Alpaca API not configured - stocks/ETFs unavailable",
-                missing_fields=[] if self.api_key else ["ALPACA_API_KEY"] + \
-                                               [] if self.api_secret else ["ALPACA_SECRET_KEY"]
+                missing_fields=missing_fields,
             )
     
     def _get_headers(self) -> dict:
@@ -78,13 +93,13 @@ class AlpacaProvider(BaseMarketProvider):
         
         results = []
         
-        # Separate stocks and crypto
-        stocks = [s for s in symbols if s in DEFAULT_STOCKS or not self._is_crypto(s)]
+        # Separate stocks/ETFs and crypto.
+        stocks = [s for s in symbols if not self._is_crypto(s)]
         crypto = [s for s in symbols if s in DEFAULT_CRYPTO or self._is_crypto(s)]
         
         # Fetch stocks
         if stocks:
-            stock_results = await self._fetch_stock_prices(stocks)
+            stock_results = await self._fetch_equity_prices(stocks, "stocks")
             results.extend(stock_results)
         
         # Fetch crypto
@@ -97,13 +112,31 @@ class AlpacaProvider(BaseMarketProvider):
     
     async def _fetch_stock_prices(self, symbols: List[str]) -> List[MarketDataPoint]:
         """Fetch US stock prices from Alpaca."""
+        return await self._fetch_equity_prices(symbols, "stocks")
+
+    async def fetch_etf_prices(self, symbols: List[str]) -> List[MarketDataPoint]:
+        """Fetch ETF prices from Alpaca's stock snapshot endpoint."""
+        if not self.is_configured:
+            logger.warning(f"Alpaca not configured, returning unavailable for {len(symbols)} ETFs")
+            return [MarketDataPoint.unavailable(sym, "etfs", self.name) for sym in symbols]
+
+        results = await self._fetch_equity_prices(symbols, "etfs")
+        self._update_cache(results)
+        return results
+
+    async def _fetch_equity_prices(
+        self,
+        symbols: List[str],
+        asset_class: str,
+    ) -> List[MarketDataPoint]:
+        """Fetch US stocks/ETFs from Alpaca."""
         results = []
-        url = f"{self.base_url}/stocks/snapshots" if not self.use_paper else f"{self.paper_url}/stocks/snapshots"
+        url = urljoin(f"{self.base_url}/", "stocks/snapshots")
         
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 # Alpaca accepts comma-separated symbols
-                sym_str = ",".join(symbols[:50])  # Max 50 per request
+                sym_str = ",".join(symbols)
                 
                 params = {"symbols": sym_str}
                 headers = self._get_headers()
@@ -118,19 +151,27 @@ class AlpacaProvider(BaseMarketProvider):
                         daily = snapshot.get("dailyBar", {})
                         prev = snapshot.get("prevDailyBar", {})
                         latest = snapshot.get("latestQuote", {})
+                        trade = snapshot.get("latestTrade", {})
                         
-                        price = float(latest.get("bp", 0)) if latest else 0
+                        price = float(trade.get("p", 0)) if trade else 0
+                        if not price and latest:
+                            bid = float(latest.get("bp", 0) or 0)
+                            ask = float(latest.get("ap", 0) or 0)
+                            price = (bid + ask) / 2 if bid and ask else ask or bid
                         if not price and daily:
                             price = float(daily.get("c", 0))
                         
                         prev_close = float(prev.get("c", 0)) if prev else 0
                         change = ((price - prev_close) / prev_close * 100) if prev_close else 0
-                        
-                        timestamp = int(datetime.now(UTC).timestamp() * 1000)
-                        
+
+                        timestamp = self._parse_alpaca_ts(
+                            trade.get("t") if trade else None,
+                            latest.get("t") if latest else None,
+                        )
+
                         dp = MarketDataPoint(
                             symbol=symbol,
-                            asset_class="stocks",
+                            asset_class=asset_class,
                             price=price,
                             change=round(change, 2),
                             timestamp=timestamp,
@@ -144,24 +185,36 @@ class AlpacaProvider(BaseMarketProvider):
                     except Exception as e:
                         logger.error(f"Error parsing stock data for {symbol}: {e}")
                         results.append(self._handle_error(symbol, e))
+
+                returned = {r.symbol for r in results}
+                for symbol in symbols:
+                    if symbol not in returned:
+                        results.append(MarketDataPoint.unavailable(symbol, asset_class, self.name))
                         
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                logger.error("Alpaca API keys are invalid (401) — disabling Alpaca provider")
+                self.is_configured = False
+            else:
+                logger.error(f"Alpaca HTTP error {e.response.status_code}: {e}")
+            for sym in symbols:
+                results.append(MarketDataPoint.unavailable(sym, asset_class, self.name))
         except Exception as e:
             logger.error(f"Error fetching stock prices from Alpaca: {e}")
-            # Return unavailable for all
             for sym in symbols:
-                results.append(MarketDataPoint.unavailable(sym, "stocks", self.name))
-        
+                results.append(MarketDataPoint.unavailable(sym, asset_class, self.name))
+
         return results
     
     async def _fetch_crypto_prices(self, symbols: List[str]) -> List[MarketDataPoint]:
         """Fetch crypto prices from Alpaca."""
         results = []
-        url = f"{self.base_url}/crypto/snapshots" if not self.use_paper else f"{self.paper_url}/crypto/snapshots"
+        url = f"{self.base_url}/crypto/us/snapshots"
         
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 # Alpaca crypto symbols are like BTC/USD
-                alpaca_symbols = [f"{s}/USD" if "/" not in s else s for s in symbols[:20]]
+                alpaca_symbols = [f"{s}/USD" if "/" not in s else s for s in symbols]
                 sym_str = ",".join(alpaca_symbols)
                 
                 params = {"symbols": sym_str}
@@ -180,15 +233,23 @@ class AlpacaProvider(BaseMarketProvider):
                         daily = snapshot.get("dailyBar", {})
                         prev = snapshot.get("prevDailyBar", {})
                         latest = snapshot.get("latestQuote", {})
-                        
-                        price = float(latest.get("bp", 0)) if latest else 0
+                        trade = snapshot.get("latestTrade", {})
+
+                        price = float(trade.get("p", 0)) if trade else 0
+                        if not price and latest:
+                            bid = float(latest.get("bp", 0) or 0)
+                            ask = float(latest.get("ap", 0) or 0)
+                            price = (bid + ask) / 2 if bid and ask else ask or bid
                         if not price and daily:
                             price = float(daily.get("c", 0))
-                        
+
                         prev_close = float(prev.get("c", 0)) if prev else 0
                         change = ((price - prev_close) / prev_close * 100) if prev_close else 0
-                        
-                        timestamp = int(datetime.now(UTC).timestamp() * 1000)
+
+                        timestamp = self._parse_alpaca_ts(
+                            trade.get("t") if trade else None,
+                            latest.get("t") if latest else None,
+                        )
                         
                         dp = MarketDataPoint(
                             symbol=clean_sym,
@@ -217,9 +278,26 @@ class AlpacaProvider(BaseMarketProvider):
     
     def _is_crypto(self, symbol: str) -> bool:
         """Check if symbol is likely a cryptocurrency."""
-        crypto_indicators = ["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", 
-                           "AVAX", "MATIC", "DOT", "LTC", "LINK"]
-        return symbol in crypto_indicators or len(symbol) <= 5 and symbol.isalpha()
+        clean = symbol.replace("/USD", "").replace("USD", "")
+        return symbol in DEFAULT_CRYPTO or clean in DEFAULT_CRYPTO
+
+    @staticmethod
+    def _parse_alpaca_ts(*candidates: object) -> int:
+        """Extract a millisecond timestamp from Alpaca's ISO-8601 strings."""
+        for ts in candidates:
+            if not isinstance(ts, str) or not ts:
+                continue
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                return int(dt.timestamp() * 1000)
+            except (ValueError, TypeError):
+                continue
+        return int(datetime.now(UTC).timestamp() * 1000)
+
+    def _normalize_data_url(self, url: str) -> str:
+        """Ensure Alpaca market data URLs include the v2 API prefix."""
+        clean = url.rstrip("/")
+        return clean if clean.endswith("/v2") else f"{clean}/v2"
     
     def get_default_symbols(self) -> List[str]:
         """Return default stocks and crypto symbols."""
@@ -228,6 +306,10 @@ class AlpacaProvider(BaseMarketProvider):
     def get_stock_symbols(self) -> List[str]:
         """Return default stock symbols."""
         return DEFAULT_STOCKS.copy()
+
+    def get_etf_symbols(self) -> List[str]:
+        """Return default ETF symbols."""
+        return DEFAULT_ETFS.copy()
     
     def get_crypto_symbols(self) -> List[str]:
         """Return default crypto symbols."""

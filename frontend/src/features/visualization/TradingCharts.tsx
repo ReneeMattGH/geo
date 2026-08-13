@@ -32,6 +32,7 @@ interface Reliability {
     win_rate: number
     sharpe_ratio: number
     max_drawdown: number
+    basis?: string
 }
 
 interface ReasoningStep {
@@ -75,168 +76,23 @@ interface Signal {
     event_timeline: TimelineEntry[]
     related_assets: string[]
     generated_at: string
+    price?: number | null
+    live_change_pct?: number | null
+    quote_timestamp?: string
+    data_status?: string
+    data_source?: string
+    actionable?: boolean
 }
 
-// ── Fallback data (used when backend is offline) ──────────────────────────────
-
-const FALLBACK_SIGNALS: Signal[] = [
-    {
-        symbol: 'XAUUSD', label: 'Gold', asset_class: 'commodity', category: 'Commodities',
-        sector: 'metals', region: 'global', description: 'Safe-haven precious metal',
-        geo_sensitivity: ['military_escalation', 'sanctions'],
-        action: 'BUY', confidence_pct: 88, uncertainty_pct: 12, time_horizon: 'short-term',
-        bullish_strength: 0.74, bearish_strength: 0.08, volatility_label: 'MEDIUM',
-        vol_spike_prob: 0.81,
-        trade_setup: { current_price: 2341, entry_price: 2341, stop_loss: 2298, target_price: 2427, risk_reward: 2.0, atr_pct: 1.84, max_position_pct: 3.2 },
-        reliability: { historical_accuracy: 0.68, win_rate: 0.62, sharpe_ratio: 1.42, max_drawdown: 0.12 },
-        triggering_event: { id: 'e1', title: 'Iran-Israel Escalation — Missile Exchanges', category: 'military_escalation', severity: 0.92, ts: new Date(Date.now() - 7200000).toISOString() },
-        reasoning_summary: 'BUY Gold — safe-haven demand surge driven by military escalation in Middle East. Confidence 88%.',
-        reasoning_chain: [
-            { step: 1, label: 'Event Detected', description: 'Military escalation detected in Middle East', evidence: 'Severity 92% · Iran-Israel Missile Exchanges', phase: 'event', confidence_contribution: 0.35 },
-            { step: 2, label: 'Economic Impact', description: 'Safe-haven demand surge triggered', evidence: 'Historical: GTI >75 → Gold rallies avg 4.6% in 24h', phase: 'economic_impact', confidence_contribution: 0.28 },
-            { step: 3, label: 'Market Mechanism', description: 'Institutional flight to safety driving bid', evidence: 'Options IV elevated; CDS spreads widening', phase: 'mechanism', confidence_contribution: 0.22 },
-            { step: 4, label: 'Asset Movement', description: 'BUY Gold — documented safe-haven correlation', evidence: 'Geo-sensitivity confirmed for military events', phase: 'movement', confidence_contribution: 0.15 },
-        ],
-        event_timeline: [
-            { ts: new Date(Date.now() - 7200000).toISOString(), label: 'Event Detected', detail: 'Iran-Israel Escalation — Missile Exchanges', phase: 'event' },
-            { ts: new Date(Date.now() - 7080000).toISOString(), label: 'NLP Classification', detail: 'Category: military escalation · Severity: 92%', phase: 'nlp' },
-            { ts: new Date(Date.now() - 6840000).toISOString(), label: 'BUY Signal Generated', detail: 'Gold BUY · Confidence: 88%', phase: 'signal' },
-            { ts: new Date(Date.now() - 5400000).toISOString(), label: 'Market Reaction', detail: 'Gold +2.4% (est.)', phase: 'reaction' },
-        ],
-        related_assets: ['XAGUSD', 'GLD', 'TLT'],
-        generated_at: new Date().toISOString(),
-    },
-    {
-        symbol: 'WTI', label: 'WTI Crude Oil', asset_class: 'commodity', category: 'Commodities',
-        sector: 'energy', region: 'middle_east', description: 'West Texas Intermediate crude',
-        geo_sensitivity: ['energy_supply_disruption', 'military_escalation'],
-        action: 'BUY', confidence_pct: 82, uncertainty_pct: 18, time_horizon: 'short-term',
-        bullish_strength: 0.70, bearish_strength: 0.10, volatility_label: 'HIGH',
-        vol_spike_prob: 0.75,
-        trade_setup: { current_price: 83.4, entry_price: 83.4, stop_loss: 80.1, target_price: 90.3, risk_reward: 2.1, atr_pct: 3.96, max_position_pct: 2.8 },
-        reliability: { historical_accuracy: 0.71, win_rate: 0.65, sharpe_ratio: 1.55, max_drawdown: 0.14 },
-        triggering_event: { id: 'e1', title: 'Iran-Israel Escalation — Strait of Hormuz Risk', category: 'military_escalation', severity: 0.92, ts: new Date(Date.now() - 7200000).toISOString() },
-        reasoning_summary: 'BUY WTI Oil — Hormuz strait disruption risk from Middle East escalation. Confidence 82%.',
-        reasoning_chain: [
-            { step: 1, label: 'Event Detected', description: 'Military conflict detected near Strait of Hormuz', evidence: 'Severity 92% · Iran-Israel exchange', phase: 'event', confidence_contribution: 0.38 },
-            { step: 2, label: 'Economic Impact', description: 'Supply reduction threatens 20% of global oil flow', evidence: 'Hormuz route carries ~18M bbl/day', phase: 'economic_impact', confidence_contribution: 0.30 },
-            { step: 3, label: 'Market Mechanism', description: 'Spot market premium expansion; futures backwardation', evidence: 'Backwardation detected in front-month contracts', phase: 'mechanism', confidence_contribution: 0.20 },
-            { step: 4, label: 'Asset Movement', description: 'BUY WTI — energy sector outperforms in supply crises', evidence: 'WTI+BRENT confirmed sensitivity to ME conflicts', phase: 'movement', confidence_contribution: 0.12 },
-        ],
-        event_timeline: [
-            { ts: new Date(Date.now() - 7200000).toISOString(), label: 'Event Detected', detail: 'Missile exchanges near Hormuz Strait', phase: 'event' },
-            { ts: new Date(Date.now() - 7080000).toISOString(), label: 'NLP Classification', detail: 'Energy supply disruption · Severity 92%', phase: 'nlp' },
-            { ts: new Date(Date.now() - 6720000).toISOString(), label: 'BUY Signal Generated', detail: 'WTI BUY · Confidence 82%', phase: 'signal' },
-            { ts: new Date(Date.now() - 4800000).toISOString(), label: 'Market Reaction', detail: 'WTI +3.8% (est.)', phase: 'reaction' },
-        ],
-        related_assets: ['BRENT', 'XLE', 'XOM', 'CVX'],
-        generated_at: new Date().toISOString(),
-    },
-    {
-        symbol: 'LMT', label: 'Lockheed Martin', asset_class: 'stock', category: 'Stocks',
-        sector: 'defense', region: 'americas', description: 'Defense prime contractor',
-        geo_sensitivity: ['military_escalation', 'nuclear_threat'],
-        action: 'BUY', confidence_pct: 85, uncertainty_pct: 15, time_horizon: 'medium-term',
-        bullish_strength: 0.72, bearish_strength: 0.05, volatility_label: 'MEDIUM',
-        vol_spike_prob: 0.78,
-        trade_setup: { current_price: 472.5, entry_price: 472.5, stop_loss: 454.2, target_price: 509.1, risk_reward: 2.0, atr_pct: 1.94, max_position_pct: 2.5 },
-        reliability: { historical_accuracy: 0.65, win_rate: 0.60, sharpe_ratio: 1.28, max_drawdown: 0.13 },
-        triggering_event: { id: 'e1', title: 'Iran-Israel Escalation — NATO Defense Posture', category: 'military_escalation', severity: 0.92, ts: new Date(Date.now() - 7200000).toISOString() },
-        reasoning_summary: 'BUY LMT — defense spending surge expected from Middle East escalation. Confidence 85%.',
-        reasoning_chain: [
-            { step: 1, label: 'Event Detected', description: 'Regional military conflict escalation detected', evidence: 'Severity 92% · Missile exchange reported', phase: 'event', confidence_contribution: 0.35 },
-            { step: 2, label: 'Economic Impact', description: 'Defense procurement acceleration expected', evidence: 'Historical: conflicts → 12-18% defense budget uplift', phase: 'economic_impact', confidence_contribution: 0.30 },
-            { step: 3, label: 'Market Mechanism', description: 'Government contracts + emergency appropriations', evidence: 'F-35 contract pipeline + THAAD demand', phase: 'mechanism', confidence_contribution: 0.22 },
-            { step: 4, label: 'Asset Movement', description: 'BUY LMT — primary missile defense contractor', evidence: 'ITA ETF basket confirmed sensitivity', phase: 'movement', confidence_contribution: 0.13 },
-        ],
-        event_timeline: [
-            { ts: new Date(Date.now() - 7200000).toISOString(), label: 'Event Detected', detail: 'Military escalation — NATO posture shift', phase: 'event' },
-            { ts: new Date(Date.now() - 7020000).toISOString(), label: 'NLP Classification', detail: 'Military escalation · Severity 92%', phase: 'nlp' },
-            { ts: new Date(Date.now() - 6600000).toISOString(), label: 'BUY Signal Generated', detail: 'LMT BUY · Confidence 85%', phase: 'signal' },
-            { ts: new Date(Date.now() - 4200000).toISOString(), label: 'Market Reaction', detail: 'LMT +2.1% (est.)', phase: 'reaction' },
-        ],
-        related_assets: ['RTX', 'NOC', 'GD', 'ITA'],
-        generated_at: new Date().toISOString(),
-    },
-    {
-        symbol: 'SPX', label: 'S&P 500', asset_class: 'equity_index', category: 'Equity Indices',
-        sector: 'broad_equity', region: 'americas', description: 'US large-cap benchmark',
-        geo_sensitivity: ['military_escalation', 'political_instability'],
-        action: 'SELL', confidence_pct: 68, uncertainty_pct: 32, time_horizon: 'short-term',
-        bullish_strength: 0.05, bearish_strength: 0.55, volatility_label: 'HIGH',
-        vol_spike_prob: 0.62,
-        trade_setup: { current_price: 5198, entry_price: 5198, stop_loss: 5291, target_price: 5012, risk_reward: 2.0, atr_pct: 1.79, max_position_pct: 1.8 },
-        reliability: { historical_accuracy: 0.61, win_rate: 0.57, sharpe_ratio: 1.10, max_drawdown: 0.18 },
-        triggering_event: { id: 'e1', title: 'Iran-Israel Escalation — Risk-Off Sentiment', category: 'military_escalation', severity: 0.92, ts: new Date(Date.now() - 7200000).toISOString() },
-        reasoning_summary: 'SELL S&P 500 — geopolitical risk-off rotation from equities to safe havens. Confidence 68%.',
-        reasoning_chain: [
-            { step: 1, label: 'Event Detected', description: 'Major geopolitical conflict escalation', evidence: 'Severity 92% · Middle East missile exchanges', phase: 'event', confidence_contribution: 0.32 },
-            { step: 2, label: 'Economic Impact', description: 'Global risk appetite deterioration', evidence: 'VIX historically spikes 30-50% on ME conflicts', phase: 'economic_impact', confidence_contribution: 0.28 },
-            { step: 3, label: 'Market Mechanism', description: 'Portfolio de-risking; margin calls on leveraged positions', evidence: 'Institutional put buying elevated; vol surface steepening', phase: 'mechanism', confidence_contribution: 0.25 },
-            { step: 4, label: 'Asset Movement', description: 'SELL SPX — equity risk premium repricing', evidence: 'Inverse correlation with GTI confirmed', phase: 'movement', confidence_contribution: 0.15 },
-        ],
-        event_timeline: [
-            { ts: new Date(Date.now() - 7200000).toISOString(), label: 'Event Detected', detail: 'Risk-off trigger — military escalation', phase: 'event' },
-            { ts: new Date(Date.now() - 7140000).toISOString(), label: 'NLP Classification', detail: 'Military escalation · Severity 92%', phase: 'nlp' },
-            { ts: new Date(Date.now() - 6960000).toISOString(), label: 'SELL Signal Generated', detail: 'S&P 500 SELL · Confidence 68%', phase: 'signal' },
-            { ts: new Date(Date.now() - 5100000).toISOString(), label: 'Market Reaction', detail: 'SPX -1.8% (est.)', phase: 'reaction' },
-        ],
-        related_assets: ['NDX', 'DJI', 'DAX'],
-        generated_at: new Date().toISOString(),
-    },
-    {
-        symbol: 'EURUSD', label: 'EUR/USD', asset_class: 'forex', category: 'Forex',
-        sector: 'currencies', region: 'europe', description: 'Major pair; Russia/ECB sensitive',
-        geo_sensitivity: ['sanctions', 'energy_supply_disruption'],
-        action: 'SELL', confidence_pct: 72, uncertainty_pct: 28, time_horizon: 'medium-term',
-        bullish_strength: 0.08, bearish_strength: 0.61, volatility_label: 'MEDIUM',
-        vol_spike_prob: 0.65,
-        trade_setup: { current_price: 1.0852, entry_price: 1.0852, stop_loss: 1.0938, target_price: 1.0680, risk_reward: 2.0, atr_pct: 0.79, max_position_pct: 2.2 },
-        reliability: { historical_accuracy: 0.64, win_rate: 0.59, sharpe_ratio: 1.25, max_drawdown: 0.09 },
-        triggering_event: { id: 'e5', title: 'Russia Natgas Flow to EU Drops 40%', category: 'energy_supply_disruption', severity: 0.80, ts: new Date(Date.now() - 36000000).toISOString() },
-        reasoning_summary: 'SELL EUR/USD — energy supply disruption weakens European growth outlook. Confidence 72%.',
-        reasoning_chain: [
-            { step: 1, label: 'Event Detected', description: 'Russian gas flow to Europe reduced 40%', evidence: 'Severity 80% · Pipeline data confirmed', phase: 'event', confidence_contribution: 0.35 },
-            { step: 2, label: 'Economic Impact', description: 'European industrial output and growth outlook deteriorate', evidence: 'Germany manufacturing PMI leading indicator negative', phase: 'economic_impact', confidence_contribution: 0.30 },
-            { step: 3, label: 'Market Mechanism', description: 'ECB dovish pivot speculation; EUR risk premium rises', evidence: 'Eurozone growth downgrade priced into rate futures', phase: 'mechanism', confidence_contribution: 0.22 },
-            { step: 4, label: 'Asset Movement', description: 'SELL EUR/USD — energy shock → growth drag → currency weakness', evidence: 'Historical: gas supply cut → EUR -2.5% avg in 30 days', phase: 'movement', confidence_contribution: 0.13 },
-        ],
-        event_timeline: [
-            { ts: new Date(Date.now() - 36000000).toISOString(), label: 'Event Detected', detail: 'Russia Natgas Flow to EU -40%', phase: 'event' },
-            { ts: new Date(Date.now() - 35880000).toISOString(), label: 'NLP Classification', detail: 'Energy supply disruption · Severity 80%', phase: 'nlp' },
-            { ts: new Date(Date.now() - 35280000).toISOString(), label: 'SELL Signal Generated', detail: 'EUR/USD SELL · Confidence 72%', phase: 'signal' },
-            { ts: new Date(Date.now() - 28800000).toISOString(), label: 'Market Reaction', detail: 'EUR/USD -0.8% (est.)', phase: 'reaction' },
-        ],
-        related_assets: ['GBPUSD', 'USDCHF', 'DAX', 'NATGAS'],
-        generated_at: new Date().toISOString(),
-    },
-    {
-        symbol: 'BTCUSD', label: 'Bitcoin', asset_class: 'crypto', category: 'Crypto',
-        sector: 'digital_assets', region: 'global', description: 'Sanctions/capital flight alternative',
-        geo_sensitivity: ['sanctions', 'political_instability'],
-        action: 'BUY', confidence_pct: 58, uncertainty_pct: 42, time_horizon: 'medium-term',
-        bullish_strength: 0.40, bearish_strength: 0.18, volatility_label: 'EXTREME',
-        vol_spike_prob: 0.52,
-        trade_setup: { current_price: 68200, entry_price: 68200, stop_loss: 62800, target_price: 79400, risk_reward: 2.07, atr_pct: 7.92, max_position_pct: 1.2 },
-        reliability: { historical_accuracy: 0.55, win_rate: 0.51, sharpe_ratio: 0.88, max_drawdown: 0.28 },
-        triggering_event: { id: 'e1', title: 'Iran Sanctions — Capital Flight to Alternatives', category: 'sanctions', severity: 0.75, ts: new Date(Date.now() - 14400000).toISOString() },
-        reasoning_summary: 'BUY Bitcoin — sanction-driven capital flight to uncensorable assets. Confidence 58% (high uncertainty).',
-        reasoning_chain: [
-            { step: 1, label: 'Event Detected', description: 'New international sanctions announced', evidence: 'Capital controls risk in affected regions', phase: 'event', confidence_contribution: 0.30 },
-            { step: 2, label: 'Economic Impact', description: 'Demand for sanction-resistant assets rises', evidence: 'Historical: SWIFT exclusion → BTC +15% in 30 days', phase: 'economic_impact', confidence_contribution: 0.28 },
-            { step: 3, label: 'Market Mechanism', description: 'On-chain volumes in target region spike', evidence: 'P2P premium elevated; stablecoin demand rising', phase: 'mechanism', confidence_contribution: 0.25 },
-            { step: 4, label: 'Asset Movement', description: 'BUY BTC — alternative store of value demand', evidence: 'High uncertainty applies — use small position size', phase: 'movement', confidence_contribution: 0.17 },
-        ],
-        event_timeline: [
-            { ts: new Date(Date.now() - 14400000).toISOString(), label: 'Event Detected', detail: 'Iran sanctions — capital flight signals', phase: 'event' },
-            { ts: new Date(Date.now() - 14280000).toISOString(), label: 'NLP Classification', detail: 'Sanctions · Severity 75%', phase: 'nlp' },
-            { ts: new Date(Date.now() - 13680000).toISOString(), label: 'BUY Signal Generated', detail: 'Bitcoin BUY · Confidence 58%', phase: 'signal' },
-            { ts: new Date(Date.now() - 9000000).toISOString(), label: 'Market Reaction', detail: 'BTC +4.2% (est.)', phase: 'reaction' },
-        ],
-        related_assets: ['ETHUSD', 'XAUUSD'],
-        generated_at: new Date().toISOString(),
-    },
-]
+const CATEGORY_TO_ASSET_CLASS: Record<string, string> = {
+    'Commodities': 'commodity',
+    'Equity Indices': 'equity_index',
+    'Forex': 'forex',
+    'Crypto': 'crypto',
+    'Stocks': 'stock',
+    'ETFs': 'etf',
+    'Bonds': 'bond',
+}
 
 const CATEGORIES = ['All', 'Commodities', 'Equity Indices', 'Forex', 'Crypto', 'Stocks', 'ETFs', 'Bonds']
 const ACTIONS = ['All', 'BUY', 'SELL', 'HOLD']
@@ -244,6 +100,7 @@ const ACTIONS = ['All', 'BUY', 'SELL', 'HOLD']
 // ── Utility helpers ───────────────────────────────────────────────────────────
 
 function formatPrice(p: number): string {
+    if (!Number.isFinite(p) || p <= 0) return 'Unavailable'
     if (p >= 10000) return p.toLocaleString('en-US', { maximumFractionDigits: 0 })
     if (p >= 100) return p.toFixed(2)
     if (p >= 1) return p.toFixed(4)
@@ -361,6 +218,16 @@ function SignalCard({
                     <span className="text-[8px] text-gray-500 font-mono px-1.5 py-0.5 rounded bg-white/5">
                         RR {signal.trade_setup.risk_reward.toFixed(1)}
                     </span>
+                    <span className="text-[8px] text-cyan-400 font-mono px-1.5 py-0.5 rounded bg-cyan-500/10">
+                        {(signal.data_status || 'unavailable').toUpperCase()}
+                    </span>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between font-mono text-[9px]">
+                    <span className="text-gray-300">{formatPrice(signal.trade_setup.current_price)}</span>
+                    <span className={(signal.live_change_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                        {signal.live_change_pct == null ? 'No movement data' : `${signal.live_change_pct >= 0 ? '+' : ''}${signal.live_change_pct.toFixed(2)}%`}
+                    </span>
                 </div>
 
                 {/* Triggering event */}
@@ -405,6 +272,10 @@ function SignalDetail({ signal }: { signal: Signal }) {
                         <div className="text-gray-500 text-[10px] mt-1 max-w-xs leading-relaxed">{signal.description}</div>
                     </div>
                     <div className="text-right">
+                        <div className="text-gray-200 font-mono text-base font-bold">{formatPrice(signal.trade_setup.current_price)}</div>
+                        <div className={(signal.live_change_pct ?? 0) >= 0 ? 'text-emerald-400 text-[10px]' : 'text-red-400 text-[10px]'}>
+                            {signal.live_change_pct == null ? 'No movement data' : `${signal.live_change_pct >= 0 ? '+' : ''}${signal.live_change_pct.toFixed(2)}%`}
+                        </div>
                         <div className="text-white font-mono text-2xl font-bold">{signal.confidence_pct.toFixed(0)}%</div>
                         <div className="text-gray-500 text-[10px]">confidence</div>
                         <div className="text-orange-400 font-mono text-sm mt-1">{signal.uncertainty_pct.toFixed(0)}%</div>
@@ -457,6 +328,9 @@ function SignalDetail({ signal }: { signal: Signal }) {
                     </span>
                     <span className="text-[10px] text-gray-500 font-mono px-2 py-0.5 rounded bg-white/5">
                         {signal.region.replace('_', ' ')}
+                    </span>
+                    <span className="text-[10px] text-cyan-400 font-mono px-2 py-0.5 rounded bg-cyan-500/10">
+                        {(signal.data_status || 'unavailable').toUpperCase()} · {signal.data_source || 'unknown'}
                     </span>
                 </div>
 
@@ -519,11 +393,11 @@ function SignalDetail({ signal }: { signal: Signal }) {
                                 </div>
                                 <div className="p-2.5 rounded-lg bg-white/3 border border-white/8">
                                     <div className="text-[9px] text-gray-500 font-mono uppercase mb-1">ATR (daily)</div>
-                                    <div className="text-orange-400 font-mono font-bold text-sm">{ts.atr_pct.toFixed(2)}%</div>
+                                    <div className="text-orange-400 font-mono font-bold text-sm">{(ts.atr_pct * 100).toFixed(2)}%</div>
                                 </div>
                                 <div className="p-2.5 rounded-lg bg-white/3 border border-white/8">
                                     <div className="text-[9px] text-gray-500 font-mono uppercase mb-1">Max Pos.</div>
-                                    <div className="text-purple-400 font-mono font-bold text-sm">{ts.max_position_pct.toFixed(1)}%</div>
+                                    <div className="text-purple-400 font-mono font-bold text-sm">{(ts.max_position_pct * 100).toFixed(1)}%</div>
                                 </div>
                             </div>
 
@@ -545,7 +419,7 @@ function SignalDetail({ signal }: { signal: Signal }) {
                                 <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
                                 <p className="text-[9px] text-amber-200/70 leading-relaxed">
                                     Educational purposes only. Not financial advice. Always perform your own due diligence.
-                                    Model v1.0 · Data as of {new Date(signal.generated_at).toLocaleTimeString()}
+                                    Explainable movement model · Quote as of {new Date(signal.quote_timestamp || signal.generated_at).toLocaleString()}
                                 </p>
                             </div>
                         </motion.div>
@@ -768,11 +642,11 @@ function FilterSidebar({
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function TradingCharts() {
-    const [signals, setSignals] = useState<Signal[]>(FALLBACK_SIGNALS)
-    const [loading, setLoading] = useState(false)
+    const [signals, setSignals] = useState<Signal[]>([])
+    const [loading, setLoading] = useState(true)
     const [selectedCategory, setSelectedCategory] = useState('All')
     const [selectedAction, setSelectedAction] = useState('All')
-    const [selectedSignal, setSelectedSignal] = useState<Signal | null>(FALLBACK_SIGNALS[0])
+    const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null)
     const [searchQuery, setSearchQuery] = useState('')
     const [lastRefresh, setLastRefresh] = useState(new Date())
 
@@ -784,13 +658,26 @@ export default function TradingCharts() {
     const fetchSignals = useCallback(async () => {
         setLoading(true)
         try {
-            const data = await api.getSignalsV2({ limit: 100 })
-            if (data?.signals?.length) {
-                setSignals(data.signals as Signal[])
-                if (!selectedSignal) setSelectedSignal(data.signals[0])
-            }
+            const data = await api.getSignalsV2({ limit: 500 })
+            const merged = Array.isArray(data?.signals)
+                ? (data.signals as Signal[]).sort((a, b) => {
+                    const aPriced = typeof a.price === 'number' && a.price > 0 ? 1 : 0
+                    const bPriced = typeof b.price === 'number' && b.price > 0 ? 1 : 0
+                    if (aPriced !== bPriced) return bPriced - aPriced
+                    return a.symbol.localeCompare(b.symbol)
+                })
+                : []
+
+            setSignals(merged)
+            setSelectedSignal(prev => {
+                if (prev) {
+                    return merged.find(signal => signal.symbol === prev.symbol) ?? merged[0] ?? null
+                }
+                return merged[0] ?? null
+            })
         } catch {
-            // keep fallback data
+            setSignals([])
+            setSelectedSignal(null)
         } finally {
             setLoading(false)
             setLastRefresh(new Date())
@@ -805,7 +692,9 @@ export default function TradingCharts() {
 
     // Filtered signals
     const filtered = signals.filter(s => {
-        const catMatch = selectedCategory === 'All' || s.category === selectedCategory || s.asset_class === selectedCategory.toLowerCase()
+        const catMatch = selectedCategory === 'All'
+            || s.category === selectedCategory
+            || s.asset_class === CATEGORY_TO_ASSET_CLASS[selectedCategory]
         const actMatch = selectedAction === 'All' || s.action === selectedAction
         const q = searchQuery.toLowerCase()
         const qMatch = !q || s.symbol.toLowerCase().includes(q) || s.label.toLowerCase().includes(q) || s.sector.toLowerCase().includes(q)

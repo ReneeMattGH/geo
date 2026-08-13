@@ -97,11 +97,28 @@ export const usePortfolioRisk = () => {
     })
 }
 
+// The backend caches each asset class for 10–60s depending on how expensive its
+// upstream is, so polling faster than this only returns the same payload.
+const MARKET_REFETCH_MS = 15000
+
 export const useAllMarkets = () => {
     return useQuery({
         queryKey: ['all-markets'],
         queryFn: api.getAllMarkets,
-        refetchInterval: 12000,
-        staleTime: 10000,
+        refetchInterval: MARKET_REFETCH_MS,
+        staleTime: MARKET_REFETCH_MS,
+        // Keep the previous asset list on screen while a refetch is in flight.
+        placeholderData: prev => prev,
+    })
+}
+
+export const useMarketsByClass = (assetClass: string) => {
+    const normalized = assetClass.toLowerCase()
+    return useQuery({
+        queryKey: ['markets', normalized],
+        queryFn: () => api.getMarketsByClass(normalized),
+        refetchInterval: MARKET_REFETCH_MS,
+        staleTime: MARKET_REFETCH_MS,
+        placeholderData: prev => prev,
     })
 }

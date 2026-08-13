@@ -14,6 +14,8 @@ Endpoints:
     GET /markets/forex          — forex rates from Twelve Data
     GET /markets/commodities    — commodity prices
     GET /markets/bonds          — treasury yields from FRED
+    GET /markets/etfs           — ETF prices
+    GET /markets/indices        — equity index levels
 """
 from __future__ import annotations
 
@@ -37,6 +39,8 @@ from app.services.market import (
     get_forex,
     get_commodities,
     get_bonds,
+    get_etfs,
+    get_indices,
     get_by_asset_class,
 )
 
@@ -254,12 +258,24 @@ async def markets_bonds() -> Dict[str, Any]:
     return await get_bonds()
 
 
+@router.get("/markets/etfs", tags=["markets"])
+async def markets_etfs() -> Dict[str, Any]:
+    """Get ETF market data."""
+    return await get_etfs()
+
+
+@router.get("/markets/indices", tags=["markets"])
+async def markets_indices() -> Dict[str, Any]:
+    """Get equity index market data."""
+    return await get_indices()
+
+
 @router.get("/markets/{asset_class}", tags=["markets"])
 async def markets_by_class(asset_class: str) -> Dict[str, Any]:
     """Get market data for a specific asset class.
     
     Args:
-        asset_class: One of: stocks, crypto, forex, commodities, bonds
+        asset_class: One of: stocks, crypto, forex, commodities, bonds, etfs, indices
         
     Returns:
         Market data for the specified asset class
