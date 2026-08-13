@@ -43,139 +43,87 @@ function mapSignalsAssetsToLegacy(signal: any): any {
 
 export const api = {
     getGti: async (): Promise<GTIResponse> => {
-        try {
-            const res = await fetch(`${API_BASE}/gti/current`, { signal: AbortSignal.timeout(5000) })
-            if (!res.ok) return fallbackGTI
-            const json = await res.json()
-            const parsed = GTIResponseSchema.safeParse(json)
-            if (!parsed.success) return fallbackGTI
-            return parsed.data
-        } catch {
-            return fallbackGTI
-        }
+        const res = await fetch(`${API_BASE}/gti/current`, { signal: AbortSignal.timeout(5000) })
+        if (!res.ok) throw new Error(`GTI fetch failed: ${res.status}`)
+        const json = await res.json()
+        const parsed = GTIResponseSchema.safeParse(json)
+        if (!parsed.success) throw new Error('GTI validation failed')
+        return parsed.data
     },
 
     getSignals: async (): Promise<SignalsResponse> => {
         // Primary: richer event-aware signal engine (v2)
-        try {
-            const res = await fetch(`${API_BASE}/signals/v2/all?limit=80`, { signal: AbortSignal.timeout(10000) })
-            if (res.ok) {
-                const json = await res.json()
-                if (Array.isArray(json?.signals) && json.signals.length > 0) {
-                    return { signals: json.signals.map(mapSignalV2ToLegacy) }
-                }
-            }
-        } catch {
-            // fallback below
+        const res = await fetch(`${API_BASE}/signals/v2/all?limit=80`, { signal: AbortSignal.timeout(10000) })
+        if (!res.ok) throw new Error(`Signals fetch failed: ${res.status}`)
+        const json = await res.json()
+        if (Array.isArray(json?.signals) && json.signals.length > 0) {
+            return { signals: json.signals.map(mapSignalV2ToLegacy) }
         }
-
-        // Secondary: legacy model endpoint
-        try {
-            const res = await fetch(`${API_BASE}/signals/assets`, { signal: AbortSignal.timeout(5000) })
-            if (!res.ok) return { signals: fallbackSignals }
-            const json = await res.json()
-            const normalized = {
-                ...json,
-                signals: Array.isArray(json?.signals) ? json.signals.map(mapSignalsAssetsToLegacy) : [],
-            }
-            const parsed = SignalsResponseSchema.safeParse(normalized)
-            if (!parsed.success) return { signals: fallbackSignals }
-            return parsed.data
-        } catch {
-            return { signals: fallbackSignals }
-        }
+        throw new Error('No signals data available')
     },
 
     getEvents: async (): Promise<EventsResponse> => {
-        try {
-            const res = await fetch(`${API_BASE}/events/timeline`, { signal: AbortSignal.timeout(5000) })
-            if (!res.ok) return { events: fallbackEvents }
-            const json = await res.json()
-            const parsed = EventsResponseSchema.safeParse(json)
-            if (!parsed.success) return { events: fallbackEvents }
-            return parsed.data
-        } catch {
-            return { events: fallbackEvents }
-        }
+        const res = await fetch(`${API_BASE}/events/timeline`, { signal: AbortSignal.timeout(5000) })
+        if (!res.ok) throw new Error(`Events fetch failed: ${res.status}`)
+        const json = await res.json()
+        const parsed = EventsResponseSchema.safeParse(json)
+        if (!parsed.success) throw new Error('Events validation failed')
+        return parsed.data
     },
 
     getGlobeCountries: async (): Promise<any> => {
-        try {
-            const res = await fetch(`${API_BASE}/globe/countries`, { signal: AbortSignal.timeout(5000) })
-            if (!res.ok) return fallbackGlobeCountries
-            return res.json()
-        } catch {
-            return fallbackGlobeCountries
-        }
+        const res = await fetch(`${API_BASE}/globe/countries`, { signal: AbortSignal.timeout(5000) })
+        if (!res.ok) throw new Error(`Globe countries fetch failed: ${res.status}`)
+        return res.json()
     },
 
     getCountryMarketImpact: async (iso: string): Promise<any> => {
-        try {
-            const res = await fetch(`${API_BASE}/globe/market-impact/${encodeURIComponent(iso)}`, { signal: AbortSignal.timeout(8000) })
-            if (!res.ok) return fallbackMarketImpact(iso)
-            return res.json()
-        } catch {
-            return fallbackMarketImpact(iso)
-        }
+        const res = await fetch(`${API_BASE}/globe/market-impact/${encodeURIComponent(iso)}`, { signal: AbortSignal.timeout(8000) })
+        if (!res.ok) throw new Error(`Market impact fetch failed: ${res.status}`)
+        return res.json()
     },
 
     getEnhancedSignals: async (region?: string): Promise<any> => {
-        try {
-            const url = region
-                ? `${API_BASE}/signals/enhanced?region=${encodeURIComponent(region)}`
-                : `${API_BASE}/signals/enhanced`
-            const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
-            if (!res.ok) return fallbackEnhancedSignals
-            return res.json()
-        } catch {
-            return fallbackEnhancedSignals
-        }
+        const url = region
+            ? `${API_BASE}/signals/enhanced?region=${encodeURIComponent(region)}`
+            : `${API_BASE}/signals/enhanced`
+        const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
+        if (!res.ok) throw new Error(`Enhanced signals fetch failed: ${res.status}`)
+        return res.json()
     },
 
     getSignalsV2: async (params?: { category?: string; action?: string; limit?: number }): Promise<any> => {
-        try {
-            const qs = new URLSearchParams()
-            if (params?.category) qs.set('category', params.category)
-            if (params?.action)   qs.set('action', params.action)
-            if (params?.limit)    qs.set('limit', String(params.limit))
-            const url = `${API_BASE}/signals/v2/all${qs.toString() ? '?' + qs.toString() : ''}`
-            const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
-            if (!res.ok) return null
-            return res.json()
-        } catch {
-            return null
-        }
+        const qs = new URLSearchParams()
+        if (params?.category) qs.set('category', params.category)
+        if (params?.action)   qs.set('action', params.action)
+        if (params?.limit)    qs.set('limit', String(params.limit))
+        const url = `${API_BASE}/signals/v2/all${qs.toString() ? '?' + qs.toString() : ''}`
+        const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+        if (!res.ok) throw new Error(`SignalsV2 fetch failed: ${res.status}`)
+        return res.json()
     },
 
     getAssetUniverse: async (): Promise<any> => {
-        try {
-            const res = await fetch(`${API_BASE}/signals/v2/universe`, { signal: AbortSignal.timeout(8000) })
-            if (!res.ok) return null
-            return res.json()
-        } catch {
-            return null
-        }
+        const res = await fetch(`${API_BASE}/signals/v2/universe`, { signal: AbortSignal.timeout(8000) })
+        if (!res.ok) throw new Error(`Asset universe fetch failed: ${res.status}`)
+        return res.json()
     },
 
     getLivePrices: async (symbols?: string[]): Promise<Record<string, { price: number; change_pct: number; source?: string }>> => {
-        try {
-            const qs = new URLSearchParams()
-            if (symbols && symbols.length > 0) {
-                qs.set('symbols', symbols.join(','))
-            }
-            const url = `${API_BASE}/market/live${qs.toString() ? '?' + qs.toString() : ''}`
-            const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
-            if (!res.ok) return {}
-            const json = await res.json()
-            const items = Array.isArray(json?.prices) ? json.prices : []
-            return Object.fromEntries(
-                items
-                    .filter((row: any) => row?.symbol && typeof row?.price === 'number')
-                    .map((row: any) => [String(row.symbol), { price: row.price, change_pct: row.change_pct ?? 0, source: row.source }])
-            )
-        } catch {
-            return {}
+        const qs = new URLSearchParams()
+        if (symbols && symbols.length > 0) {
+            qs.set('symbols', symbols.join(','))
         }
+        const url = `${API_BASE}/market/live${qs.toString() ? '?' + qs.toString() : ''}`
+        const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
+        if (!res.ok) throw new Error(`Live prices fetch failed: ${res.status}`)
+        const json = await res.json()
+        const items = Array.isArray(json?.prices) ? json.prices : []
+        return Object.fromEntries(
+            items
+                .filter((row: any) => row?.symbol && typeof row?.price === 'number')
+                .map((row: any) => [String(row.symbol), { price: row.price, change_pct: row.change_pct ?? 0, source: row.source }])
+        )
     },
 
     simulateScenario: async (params: any) => {
@@ -197,16 +145,12 @@ export const api = {
 
     // ── Cart / email-keyed portfolio ──────────────────────────────────────
     getCart: async (email: string): Promise<any> => {
-        try {
-            const res = await fetch(
-                `${API_BASE}/portfolio/cart?email=${encodeURIComponent(email)}`,
-                { signal: AbortSignal.timeout(8000) }
-            )
-            if (!res.ok) return null
-            return res.json()
-        } catch {
-            return null
-        }
+        const res = await fetch(
+            `${API_BASE}/portfolio/cart?email=${encodeURIComponent(email)}`,
+            { signal: AbortSignal.timeout(8000) }
+        )
+        if (!res.ok) throw new Error(`Cart fetch failed: ${res.status}`)
+        return res.json()
     },
 
     saveCart: async (email: string, holdings: any[], name = 'My Portfolio'): Promise<any> => {
@@ -234,12 +178,8 @@ export const api = {
     },
 
     getAllMarkets: async (): Promise<any> => {
-        try {
-            const res = await fetch(`${API_BASE}/market/markets/all`, { signal: AbortSignal.timeout(15000) })
-            if (!res.ok) return null
-            return res.json()
-        } catch {
-            return null
-        }
+        const res = await fetch(`${API_BASE}/market/markets/all`, { signal: AbortSignal.timeout(15000) })
+        if (!res.ok) throw new Error(`All markets fetch failed: ${res.status}`)
+        return res.json()
     },
 }

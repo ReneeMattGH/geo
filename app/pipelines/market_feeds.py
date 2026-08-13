@@ -244,17 +244,22 @@ def _load_finnhub_keys() -> list[str]:
     try:
         from app.core.config import get_settings
         s = get_settings()
-        if s.finnhub_api_key:
+        if s.finnhub_api_key and s.finnhub_api_key != "your_finnhub_key_here":
             keys.append(s.finnhub_api_key)
-        if s.finnhub_api_key_2:
+            logger.info(f"Loaded Finnhub key 1: {s.finnhub_api_key[:10]}...")
+        if s.finnhub_api_key_2 and s.finnhub_api_key_2 not in ["your_second_finnhub_key_for_rotation", "your_finnhub_key_here", ""]:
             keys.append(s.finnhub_api_key_2)
-    except Exception:
-        pass
+            logger.info(f"Loaded Finnhub key 2: {s.finnhub_api_key_2[:10]}...")
+    except Exception as e:
+        logger.error(f"Error loading Finnhub keys from settings: {e}")
     # Also check env vars directly (useful inside Docker before settings load)
     for env_var in ("FINNHUB_API_KEY", "FINNHUB_API_KEY_2"):
         v = os.environ.get(env_var, "")
-        if v and v not in keys:
+        if v and v not in keys and v not in ["your_second_finnhub_key_for_rotation", "your_finnhub_key_here", ""]:
             keys.append(v)
+            logger.info(f"Loaded Finnhub key from env {env_var}: {v[:10]}...")
+    if not keys:
+        logger.warning("No valid Finnhub API keys found")
     return keys or [""]   # always return at least one slot
 
 
@@ -299,7 +304,6 @@ class RealMarketAdapter(MarketFeedAdapter):
             self._clients[k] = httpx.AsyncClient(
                 base_url=_FINNHUB_BASE,
                 timeout=_REQUEST_TIMEOUT,
-                headers={"X-Finnhub-Token": k},
             )
         return self._clients[k]
 
@@ -315,7 +319,7 @@ class RealMarketAdapter(MarketFeedAdapter):
         try:
             resp = await client.get(
                 _FINNHUB_QUOTE,
-                params={"symbol": fh_symbol},
+                params={"symbol": fh_symbol, "token": key},
             )
             if resp.status_code == 429:
                 # This key is rate-limited — try the next key immediately
@@ -324,7 +328,7 @@ class RealMarketAdapter(MarketFeedAdapter):
                     fallback_key = self._next_key()
                     fallback_client = self._get_client(fallback_key)
                     try:
-                        resp2 = await fallback_client.get(_FINNHUB_QUOTE, params={"symbol": fh_symbol})
+                        resp2 = await fallback_client.get(_FINNHUB_QUOTE, params={"symbol": fh_symbol, "token": fallback_key})
                         if resp2.status_code == 200:
                             data = resp2.json()
                             if data.get("c"):
@@ -370,10 +374,11 @@ class RealMarketAdapter(MarketFeedAdapter):
             fh_to_internal.setdefault(fh_sym, []).append(sym)
 
         # Rate-limit: space requests within per-key limits.
-        # With 2 keys (120 req/min combined) and ~25 unique symbols per poll:
-        #   25 requests × 0.5s gap = 12.5s per cycle — well within 30s interval.
+        # With 1 key (60 req/min) and ~25 unique symbols per poll:
+        #   25 requests × 1.2s gap = 30s per cycle — within 60s limit
+        # More conservative to avoid rate limits on free tier
         n_keys = max(1, len(self._keys))
-        delay = max(0.3, (60.0 / _FINNHUB_RATE_LIMIT) / n_keys)  # ~0.5s with 2 keys
+        delay = max(1.2, (60.0 / _FINNHUB_RATE_LIMIT) / n_keys)  # ~1.0s with 1 key
 
         for fh_sym, internal_syms in fh_to_internal.items():
             raw = await self.fetch_quote(fh_sym)
@@ -418,7 +423,9 @@ class RealMarketAdapter(MarketFeedAdapter):
                     source="finnhub",
                 ))
 
-            await asyncio.sleep(delay)
+            # Only sleep if there are more symbols to fetch
+            if list(fh_to_internal.keys()).index(fh_sym) < len(fh_to_internal) - 1:
+                await asyncio.sleep(delay)
 
         logger.info("finnhub_quotes_fetched", count=len(ticks), symbols=len(fh_to_internal))
         return ticks
