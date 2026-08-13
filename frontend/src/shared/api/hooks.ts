@@ -112,6 +112,16 @@ export const useAllMarkets = () => {
     })
 }
 
+export const useNewsTicker = () => {
+    return useQuery({
+        queryKey: ['news-ticker'],
+        queryFn: api.getNewsTicker,
+        refetchInterval: 15000,
+        staleTime: 10000,
+        placeholderData: prev => prev,
+    })
+}
+
 export const useMarketsByClass = (assetClass: string) => {
     const normalized = assetClass.toLowerCase()
     return useQuery({

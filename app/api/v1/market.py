@@ -270,6 +270,102 @@ async def markets_indices() -> Dict[str, Any]:
     return await get_indices()
 
 
+@router.get("/markets/news-ticker", tags=["markets"])
+async def markets_news_ticker() -> Dict[str, Any]:
+    """Generate a live news ticker from real-time market signals.
+
+    Returns headlines sorted by market impact (biggest movers first),
+    covering all asset classes with AI analysis context.
+    """
+    from app.services.market.market_service import get_unified_market_service
+    from app.config.asset_universe import get_asset_universe
+    from datetime import timezone
+
+    service = get_unified_market_service()
+    universe = get_asset_universe()
+    cached = service.get_all_cached()
+    data = cached.get("data", {})
+
+    headlines: List[Dict[str, Any]] = []
+    now = datetime.now(UTC)
+
+    category_labels = {
+        "stocks": "Equities", "crypto": "Crypto", "forex": "FX",
+        "commodities": "Commodities", "bonds": "Bonds",
+        "etfs": "ETFs", "indices": "Indices",
+    }
+
+    for sym, dp in data.items():
+        if not isinstance(dp, dict):
+            dp_dict = dp.to_dict() if hasattr(dp, "to_dict") else {"symbol": sym}
+        else:
+            dp_dict = dp
+        price = dp_dict.get("price", 0) if isinstance(dp_dict, dict) else getattr(dp, "price", 0)
+        change = dp_dict.get("change", 0) if isinstance(dp_dict, dict) else getattr(dp, "change", 0)
+        source = dp_dict.get("source", "") if isinstance(dp_dict, dict) else getattr(dp, "source", "")
+        asset_class = dp_dict.get("asset_class", "") if isinstance(dp_dict, dict) else getattr(dp, "asset_class", "")
+        name = dp_dict.get("name", sym) if isinstance(dp_dict, dict) else getattr(dp, "name", sym)
+
+        if not price or price <= 0:
+            continue
+
+        asset_def = universe.get_asset(sym)
+        display_name = asset_def.name if asset_def else name or sym
+        cat_label = category_labels.get(asset_class, asset_class.title())
+
+        # Compute implied deviation when provider reports no change.
+        # Only use assets with explicitly set base prices (not the 100.0 default).
+        # Cap at ±10% so long-term drifts don't swamp the ticker with false ALERTs.
+        if change == 0.0 and asset_def and asset_def.base_price > 0 and asset_def.base_price != 100.0:
+            raw = ((price - asset_def.base_price) / asset_def.base_price) * 100
+            change = round(max(-10.0, min(10.0, raw)), 2)
+
+        abs_change = abs(change)
+
+        if abs_change >= 0.01:
+            icon = "▲" if change > 0 else "▼"
+            if asset_class == "bonds":
+                sentiment = "hawkish" if change > 0 else "dovish"
+            else:
+                sentiment = "bullish" if change > 0 else "bearish"
+
+            if abs_change >= 3.0:
+                urgency = "ALERT"
+                headline = f"{icon} {sym} {change:+.1f}% · {display_name}"
+            elif abs_change >= 1.5:
+                urgency = "BREAKING"
+                headline = f"{icon} {sym} {change:+.2f}% · {display_name}"
+            elif abs_change >= 0.5:
+                urgency = "UPDATE"
+                headline = f"{icon} {sym} {change:+.2f}% · {display_name}"
+            else:
+                urgency = "MARKET"
+                headline = f"{sym} {change:+.2f}% · {display_name}"
+
+            headlines.append({
+                "id": f"mkt-{sym}",
+                "headline": headline,
+                "symbol": sym,
+                "category": cat_label,
+                "asset_class": asset_class,
+                "change_pct": round(change, 2),
+                "abs_change": round(abs_change, 2),
+                "price": price,
+                "urgency": urgency,
+                "sentiment": sentiment,
+                "source": source.split(":")[0],
+                "ts": now.isoformat(),
+            })
+
+    headlines.sort(key=lambda h: h["abs_change"], reverse=True)
+
+    return {
+        "headlines": headlines[:60],
+        "count": len(headlines),
+        "generated_at": now.isoformat(),
+    }
+
+
 @router.get("/markets/{asset_class}", tags=["markets"])
 async def markets_by_class(asset_class: str) -> Dict[str, Any]:
     """Get market data for a specific asset class.
