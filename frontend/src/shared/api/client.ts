@@ -243,6 +243,16 @@ export const api = {
         }
     },
 
+    getNewsTicker: async (): Promise<any> => {
+        try {
+            const res = await fetch(`${API_BASE}/market/markets/news-ticker`, { signal: AbortSignal.timeout(10000) })
+            if (!res.ok) return null
+            return res.json()
+        } catch {
+            return null
+        }
+    },
+
     getMarketsByClass: async (assetClass: string): Promise<any> => {
         try {
             const normalized = assetClass.toLowerCase()

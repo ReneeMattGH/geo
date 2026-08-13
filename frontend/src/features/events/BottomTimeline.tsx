@@ -1,123 +1,167 @@
+import { useRef, useState, useEffect, useCallback } from 'react'
 import { Panel } from '@/shared/ui/Panel'
-import { AlertCircle, AlertOctagon, Info } from 'lucide-react'
-import { useEvents } from '@/shared/api/hooks'
+import { useNewsTicker } from '@/shared/api/hooks'
 
-function EventMarker({ event }: { event: any }) {
-    const severity = event.severity_score ?? event.magnitude ?? 0
-    const isCritical = severity >= 0.8
-    const isHigh = severity >= 0.6
-    const color = isCritical ? '#ef4444' : isHigh ? '#f59e0b' : '#e2e8f0'
-    const Icon = isCritical ? AlertOctagon : isHigh ? AlertCircle : Info
-    const ts = event.occurred_at ?? event.ts
-    const time = ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'
-    const label = isCritical ? 'CRITICAL' : isHigh ? 'HIGH' : 'MEDIUM'
+interface Headline {
+    id: string
+    headline: string
+    symbol: string
+    category: string
+    asset_class: string
+    change_pct: number
+    abs_change: number
+    price: number
+    urgency: string
+    sentiment: string
+    source: string
+    ts: string
+}
+
+const URGENCY_STYLE: Record<string, { badge: string; text: string }> = {
+    ALERT:    { badge: 'bg-red-500/25 text-red-400 border-red-500/50',       text: 'text-red-200' },
+    BREAKING: { badge: 'bg-amber-500/25 text-amber-400 border-amber-500/50', text: 'text-amber-100' },
+    UPDATE:   { badge: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40',    text: 'text-gray-100' },
+    MARKET:   { badge: 'bg-white/5 text-gray-400 border-white/10',           text: 'text-gray-300' },
+}
+
+function TickerItem({ item }: { item: Headline }) {
+    const style = URGENCY_STYLE[item.urgency] ?? URGENCY_STYLE.MARKET
+    const isPositive = item.sentiment === 'bullish' || item.sentiment === 'hawkish'
+    const changeColor = isPositive ? 'text-emerald-400' : 'text-red-400'
+    const changeBg = isPositive ? 'bg-emerald-500/10' : 'bg-red-500/10'
 
     return (
-        <div
-            className="flex items-start gap-2 p-2 border border-border/50 rounded-md bg-secondary/30 min-w-[180px] sm:min-w-[200px] shrink-0 cursor-pointer hover:border-gray-500 transition-colors"
-            style={{ borderLeftColor: color, borderLeftWidth: '2px' }}
-        >
-            <Icon className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color }} />
-            <div className="flex flex-col">
-                <span className="text-[10px] font-mono leading-tight whitespace-nowrap overflow-hidden text-ellipsis w-[130px] sm:w-[155px]">
-                    {event.title}
-                </span>
-                <span className="text-[9px] font-mono text-muted-foreground mt-0.5 tracking-wider">
-                    {time} · {event.region ?? 'Global'} · {label}
-                </span>
-            </div>
-        </div>
+        <span className="inline-flex items-center gap-2.5 whitespace-nowrap mx-6">
+            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${style.badge}`}>
+                {item.urgency}
+            </span>
+            <span className={`text-[13px] font-mono tracking-wide leading-none ${style.text}`}>
+                {item.headline}
+            </span>
+            <span className={`text-[12px] font-mono font-bold px-1.5 py-0.5 rounded ${changeColor} ${changeBg}`}>
+                {item.change_pct >= 0 ? '+' : ''}{item.change_pct.toFixed(2)}%
+            </span>
+            <span className="text-[10px] font-mono text-gray-500">
+                {item.category}
+            </span>
+            <span className="text-gray-700/40 text-xs">•</span>
+        </span>
     )
 }
 
-export function BottomTimeline({ gti }: { gti: any }) {
-    const { data: eventsData } = useEvents()
-    const events = eventsData?.events ?? []
+const PX_PER_SECOND = 50
 
-    const gtiValues = [40, 45, 42, 50, 65, 78, 80, 75, 72, 70, 75, gti?.gti_value ?? 71]
+export function BottomTimeline({ gti }: { gti: any }) {
+    const { data: tickerData } = useNewsTicker()
+    const headlines: Headline[] = tickerData?.headlines ?? []
+    const [isPaused, setIsPaused] = useState(false)
+    const trackRef = useRef<HTMLDivElement>(null)
+    const [duration, setDuration] = useState(120)
+
+    const measure = useCallback(() => {
+        const el = trackRef.current
+        if (!el) return
+        const halfWidth = el.scrollWidth / 2
+        setDuration(Math.max(40, halfWidth / PX_PER_SECOND))
+    }, [])
+
+    useEffect(() => {
+        measure()
+    }, [headlines, measure])
+
+    useEffect(() => {
+        window.addEventListener('resize', measure)
+        return () => window.removeEventListener('resize', measure)
+    }, [measure])
+
+    const gtiValue = gti?.gti_value ?? 0
+    const gtiColor = gtiValue >= 68 ? 'text-red-400' : gtiValue >= 45 ? 'text-amber-400' : 'text-emerald-400'
+    const gtiBg = gtiValue >= 68 ? 'bg-red-500' : gtiValue >= 45 ? 'bg-amber-500' : 'bg-emerald-500'
+
+    const alertCount = headlines.filter(h => h.urgency === 'ALERT' || h.urgency === 'BREAKING').length
 
     return (
-        <Panel className="border-x-0 !rounded-none bg-[#161c28]/90 overflow-hidden">
-            {/* ── Desktop layout (md+): sparkline + scrolling events + count ── */}
-            <div className="hidden md:flex items-center h-[72px]">
-                {/* GTI sparkline */}
-                <div className="w-56 px-4 py-2 border-r border-border/50 h-full flex flex-col justify-center shrink-0">
-                    <div className="flex justify-between items-center text-[10px] font-mono tracking-wider mb-2">
-                        <span className="text-muted-foreground uppercase">GTI Trend</span>
-                        <span className="text-[var(--color-primary)] font-bold">
-                            {gti ? gti.gti_value.toFixed(1) : '--.-'}
-                        </span>
-                    </div>
-                    <div className="h-4 w-full flex items-end overflow-hidden gap-0.5">
-                        {gtiValues.map((v, i) => (
-                            <div
-                                key={i}
-                                className="flex-1 bg-[var(--color-primary)]/40 hover:bg-[var(--color-primary)] transition-colors rounded-sm"
-                                style={{ height: `${(v / 100) * 100}%` }}
-                            />
-                        ))}
-                    </div>
-                </div>
+        <Panel className="border-x-0 !rounded-none bg-[#080c16] border-t border-white/10 overflow-hidden">
+            <style>{`
+                @keyframes marquee {
+                    from { transform: translateX(0); }
+                    to   { transform: translateX(-50%); }
+                }
+            `}</style>
 
-                {/* Events list */}
-                <div className="flex-1 overflow-x-auto overflow-y-hidden flex items-center px-4 gap-3 scrollbar-hide">
-                    {events.slice(0, 8).map((e: any) => (
-                        <EventMarker key={e.id} event={e} />
-                    ))}
-                </div>
-
-                {/* Count */}
-                <div className="px-6 flex flex-col items-center justify-center border-l border-border/50 h-full shrink-0">
-                    <span className="text-2xl font-mono font-bold">{events.length}</span>
-                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Events</span>
-                </div>
-            </div>
-
-            {/* ── Mobile layout (< md): compact single-row bar ── */}
-            <div className="flex md:hidden items-center h-[48px] px-3 gap-3">
-                {/* GTI badge */}
-                <div className="flex items-center gap-1.5 shrink-0">
-                    <div className="h-3 w-8 flex items-end gap-px overflow-hidden">
-                        {gtiValues.slice(-5).map((v, i) => (
-                            <div
-                                key={i}
-                                className="flex-1 bg-[var(--color-primary)]/50 rounded-sm"
-                                style={{ height: `${(v / 100) * 100}%` }}
-                            />
-                        ))}
+            <div className="flex items-center h-[52px]">
+                {/* ── LIVE ── */}
+                <div className="flex items-center gap-2.5 px-4 border-r border-white/10 h-full shrink-0">
+                    <div className="relative">
+                        <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                        <div className="absolute inset-0 w-2 h-2 rounded-full bg-emerald-400 animate-ping opacity-50" />
                     </div>
-                    <span className="text-[var(--color-primary)] font-mono text-xs font-bold">
-                        GTI {gti ? gti.gti_value.toFixed(0) : '--'}
+                    <span className="text-[11px] font-mono font-bold text-emerald-400 uppercase tracking-widest">
+                        LIVE
                     </span>
                 </div>
 
-                <div className="w-px h-5 bg-border/50 shrink-0" />
-
-                {/* Scrollable event chips */}
-                <div className="flex-1 overflow-x-auto scrollbar-hide flex items-center gap-2">
-                    {events.slice(0, 5).map((e: any) => {
-                        const severity = e.severity_score ?? e.magnitude ?? 0
-                        const isCritical = severity >= 0.8
-                        const isHigh = severity >= 0.6
-                        const color = isCritical ? '#ef4444' : isHigh ? '#f59e0b' : '#e2e8f0'
-                        return (
-                            <div
-                                key={e.id}
-                                className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded border border-border/40 bg-secondary/30"
-                                style={{ borderLeftColor: color, borderLeftWidth: '2px' }}
-                            >
-                                <span className="text-[9px] font-mono whitespace-nowrap max-w-[120px] overflow-hidden text-ellipsis">
-                                    {e.title}
-                                </span>
-                            </div>
-                        )
-                    })}
+                {/* ── GTI ── */}
+                <div className="flex items-center gap-2.5 px-4 border-r border-white/10 h-full shrink-0">
+                    <span className="text-[10px] font-mono text-gray-500 uppercase tracking-wide">GTI</span>
+                    <span className={`text-sm font-mono font-bold ${gtiColor}`}>
+                        {gtiValue.toFixed(1)}
+                    </span>
+                    <div className="h-1.5 w-10 rounded-full bg-white/10 overflow-hidden">
+                        <div
+                            className={`h-full rounded-full transition-all duration-700 ${gtiBg}`}
+                            style={{ width: `${Math.min(gtiValue, 100)}%` }}
+                        />
+                    </div>
                 </div>
 
-                {/* Event count */}
-                <div className="shrink-0 flex items-center gap-1">
-                    <span className="text-sm font-mono font-bold">{events.length}</span>
-                    <span className="text-[8px] uppercase tracking-wider text-muted-foreground">events</span>
+                {/* ── Alert count ── */}
+                {alertCount > 0 && (
+                    <div className="flex items-center gap-2 px-4 border-r border-white/10 h-full shrink-0">
+                        <span className="text-sm font-mono font-bold text-red-400">{alertCount}</span>
+                        <span className="text-[9px] font-mono text-red-400/70 uppercase tracking-wide">Alerts</span>
+                    </div>
+                )}
+
+                {/* ── Marquee ── */}
+                <div
+                    className="flex-1 overflow-hidden cursor-default select-none"
+                    onMouseEnter={() => setIsPaused(true)}
+                    onMouseLeave={() => setIsPaused(false)}
+                    style={{
+                        maskImage: 'linear-gradient(to right, transparent, black 48px, black calc(100% - 48px), transparent)',
+                        WebkitMaskImage: 'linear-gradient(to right, transparent, black 48px, black calc(100% - 48px), transparent)',
+                    }}
+                >
+                    {headlines.length > 0 ? (
+                        <div
+                            ref={trackRef}
+                            className="inline-flex items-center whitespace-nowrap will-change-transform"
+                            style={{
+                                animation: `marquee ${duration}s linear infinite`,
+                                animationPlayState: isPaused ? 'paused' : 'running',
+                            }}
+                        >
+                            {headlines.map((item, i) => (
+                                <TickerItem key={`a-${i}`} item={item} />
+                            ))}
+                            {headlines.map((item, i) => (
+                                <TickerItem key={`b-${i}`} item={item} />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="flex items-center justify-center h-full">
+                            <span className="text-xs font-mono text-gray-600 animate-pulse">
+                                Connecting to market feeds...
+                            </span>
+                        </div>
+                    )}
+                </div>
+
+                {/* ── Feed count ── */}
+                <div className="flex items-center gap-2 px-4 border-l border-white/10 h-full shrink-0">
+                    <span className="text-sm font-mono font-bold text-white">{headlines.length}</span>
+                    <span className="text-[9px] font-mono text-gray-500 uppercase tracking-wide">Feeds</span>
                 </div>
             </div>
         </Panel>
