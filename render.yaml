@@ -5,9 +5,10 @@ services:
     runtime: docker
     dockerfilePath: infra/docker/Dockerfile
     dockerContext: .
-    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
-    plan: starter          # upgrade to standard for more RAM (ML models need ~1 GB)
+    dockerCommand: ./start.sh
+    plan: standard          # upgrade to standard for more RAM (ML models need ~1 GB)
     region: oregon
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -69,7 +70,7 @@ services:
     dockerfilePath: infra/docker/Dockerfile
     dockerContext: .
     dockerCommand: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q ingestion,nlp,gti,default
-    plan: starter
+    plan: standard
     region: oregon
     envVars:
       - key: DATABASE_URL
@@ -115,7 +116,7 @@ services:
     dockerfilePath: infra/docker/Dockerfile
     dockerContext: .
     dockerCommand: celery -A app.tasks.celery_app beat --loglevel=info
-    plan: starter
+    plan: standard
     region: oregon
     envVars:
       - key: DATABASE_URL

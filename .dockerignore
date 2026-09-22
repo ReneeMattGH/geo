@@ -12,3 +12,13 @@ model_artifacts
 frontend/node_modules
 frontend/.svelte-kit
 frontend/dist
+.env
+.env.local
+.env.*.local
+*.log
+tests
+docs
+*.md
+.gitignore
+README.md
+AGENTS.md

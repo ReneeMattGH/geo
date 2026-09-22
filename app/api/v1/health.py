@@ -19,8 +19,16 @@ router = APIRouter(tags=["meta"])
 
 @router.get("/health", response_model=HealthResponse, summary="System health check")
 async def health(db: AsyncSession = Depends(get_db)) -> HealthResponse:
-    db_ok = await check_db_health()
-    redis_ok = await check_redis_health()
+    try:
+        db_ok = await check_db_health()
+    except Exception:
+        db_ok = False
+
+    try:
+        redis_ok = await check_redis_health()
+    except Exception:
+        redis_ok = False
+
     # Worker liveness: check if celery heartbeat key exists in Redis
     worker_ok = True  # simplified; could inspect via celery inspect.ping()
     overall = "healthy" if (db_ok and redis_ok) else "degraded" if db_ok else "unhealthy"

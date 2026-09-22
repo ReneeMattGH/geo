@@ -62,6 +62,8 @@ class UnifiedMarketService:
         self.fred = get_fred_provider()
         self.yahoo = get_yahoo_provider()
         self.finnhub = get_finnhub_provider()
+        self.forex_backup = get_forex_provider()  # For backup
+        self.commodities_backup = get_commodities_provider()  # For backup
 
         # In-memory cache for latest data
         self._cache: Dict[str, MarketDataPoint] = {}

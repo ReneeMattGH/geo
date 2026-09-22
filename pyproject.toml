@@ -29,23 +29,23 @@ dependencies = [
     "celery[redis]==5.4.0",
 
     # NLP
-    "transformers==4.41.2",
-    "sentence-transformers==3.0.1",
+    "transformers>=4.40.0",
+    "sentence-transformers>=3.0.0",
     "torch>=2.0.0",
-    "vaderSentiment==3.3.2",
-    "hdbscan==0.8.38.post1",
-    "rapidfuzz==3.9.1",
+    "vaderSentiment>=3.3.0",
+    "hdbscan>=0.8.0",
+    "rapidfuzz>=3.0.0",
     "spacy>=3.7.0",
 
     # ML / data
-    "lightgbm==4.3.0",
-    "xgboost==2.0.3",
-    "scikit-learn==1.5.0",
-    "polars==0.20.31",
-    "pandas==2.2.2",
-    "lxml==6.0.2",
-    "numpy==1.26.4",
-    "scipy==1.13.1",
+    "lightgbm>=4.0.0",
+    "xgboost>=2.0.0",
+    "scikit-learn>=1.4.0",
+    "polars>=0.20.0",
+    "pandas>=2.2.0",
+    "lxml>=6.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
 
     # Market data
     "yfinance>=0.2.40",
