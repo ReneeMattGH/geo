@@ -4,10 +4,10 @@ Provides realistic market data when real APIs are rate-limited or unavailable.
 This ensures the frontend always displays meaningful data for demos.
 """
 from datetime import datetime, UTC
-from typing import List, Dict, Any
+from typing import List, Dict
 import random
 
-from app.services.market.base_provider import MarketDataPoint, BaseMarketProvider
+from app.services.market.base_provider import MarketDataPoint
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

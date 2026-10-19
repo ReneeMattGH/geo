@@ -6,7 +6,6 @@ using mocked HTTP responses that mirror the actual API shapes.
 from __future__ import annotations
 
 import pytest
-from datetime import datetime, UTC
 
 from app.services.market.base_provider import MarketDataPoint
 

@@ -9,8 +9,6 @@ fetched per-symbol and injected into the ML feature vector before prediction.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from app.core.audit import build_audit_meta
 from app.core.logging import get_logger
 from app.models.signal import MarketSignal
@@ -86,14 +84,12 @@ class MarketSignalService:
         ]
 
         audit = build_audit_meta()
+        audit["model_version"] = "AI_ENGINE_V1"
         return SignalAssetsResponse(
             region=region,
             timeframe=timeframe,
             signals=signal_schemas,
             count=len(signal_schemas),
-            model_version="AI_ENGINE_V1",
-            pipeline_version="1.0.0",
-            data_as_of=datetime.now(UTC).isoformat(),
             **audit,
         )
 

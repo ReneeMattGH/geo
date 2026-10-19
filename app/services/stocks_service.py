@@ -3,11 +3,12 @@ Ensures real-time updates and normalization.
 """
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, UTC
 from typing import Any, Dict, List
 
 import httpx
+from app.cache.redis_client import RedisClient
+from app.config.asset_list import ASSETS
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.services.asset_discovery_service import get_asset_discovery_service

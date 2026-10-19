@@ -26,7 +26,6 @@ Shock Propagation:
 """
 from __future__ import annotations
 
-import math
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -569,7 +568,7 @@ class ImpactGraph:
 
         edges_out = []
         seen = set()
-        for source_id, edges in self.adjacency.items():
+        for _source_id, edges in self.adjacency.items():
             for e in edges:
                 key = f"{e.source}->{e.target}:{e.relationship}"
                 if key not in seen:

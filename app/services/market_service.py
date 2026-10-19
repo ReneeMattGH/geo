@@ -6,7 +6,7 @@ so that already-fetched live prices are reused rather than re-requested.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from app.core.logging import get_logger
 from app.models.market import MarketData

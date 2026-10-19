@@ -4,13 +4,10 @@ Uses Binance WebSocket and REST API for high-frequency updates.
 """
 from __future__ import annotations
 
-import asyncio
-import json
 from datetime import datetime, UTC
 from typing import Any, Dict, List
 
 import httpx
-import websockets
 
 from app.core.config import get_settings
 from app.core.logging import get_logger

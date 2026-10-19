@@ -231,7 +231,7 @@ class CommoditiesProvider(BaseMarketProvider):
                     else:
                         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                         timestamp = int(dt.timestamp() * 1000)
-                except:
+                except (ValueError, AttributeError):
                     timestamp = int(datetime.now(UTC).timestamp() * 1000)
             else:
                 timestamp = int(datetime.now(UTC).timestamp() * 1000)

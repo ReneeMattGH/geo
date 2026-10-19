@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -93,6 +94,33 @@ def _recommendation(
     if vol_spike_prob < 0.35 and directional_bias > 0.30:
         return "Buy"
     return "Hold"
+
+
+def _heuristic_predict(features: AssetFeatures) -> tuple[float, float]:
+    """Deterministic stand-in for the ensemble when no model is available.
+
+    A fresh deploy has no pickled artifacts in the image and yfinance may be
+    unreachable; without this the whole signals endpoint would 500. Weights the
+    same features the trained model uses so output stays in a sensible range.
+    """
+    def clamp01(x: float) -> float:
+        return max(0.0, min(1.0, x))
+
+    vol_prob = clamp01(
+        0.35 * clamp01(features.realized_vol / 0.60)
+        + 0.25 * clamp01(features.gti_value / 100.0)
+        + 0.20 * clamp01(abs(features.gti_delta_1h) / 10.0)
+        + 0.20 * clamp01(features.regime_vix_proxy)
+    )
+    vol_prob = max(0.05, min(0.95, vol_prob))
+
+    momentum = 20.0 * (features.return_5d + 0.5 * features.return_1d)
+    stretched = 2.0 * ((features.rsi_14 - 0.5) + (features.bb_pct_b - 0.5))
+    macd = 50.0 * features.macd_signal_diff
+    bias = 0.6 * math.tanh(momentum) + 0.2 * math.tanh(stretched) + 0.2 * math.tanh(macd)
+    # High stress is a reason to fade the move rather than chase it.
+    bias *= 1.0 - 0.4 * vol_prob
+    return vol_prob, max(-1.0, min(1.0, bias))
 
 
 # ── Brier score tracker ───────────────────────────────────────────────────────
@@ -199,27 +227,51 @@ class MarketImpactModel:
     def __init__(self) -> None:
         self._gbm: Any = None  # LightGBM model for vol spike prob
         self._linear: Any = None  # Ridge regression for directional bias
+        self._load_failed = False
         self._version: str = "2.0.0"
         self._feature_hash = feature_schema_hash()
         self._brier_tracker = BrierScoreTracker()
 
     def _ensure_loaded(self) -> None:
-        if self._gbm is not None:
+        if self._gbm is not None or self._load_failed:
             return
+        self._load_failed = True
         settings = get_settings()
         gbm_path = settings.model_artifacts_dir / "vol_spike_lgbm.pkl"
         bias_path = settings.model_artifacts_dir / "directional_bias_ridge.pkl"
 
+        import pickle
+
         if gbm_path.exists() and bias_path.exists():
-            import pickle
-            with gbm_path.open("rb") as f:
-                self._gbm = pickle.load(f)  # noqa: S301
-            with bias_path.open("rb") as f:
-                self._linear = pickle.load(f)  # noqa: S301
-            logger.info("market_model_loaded_from_disk")
-        else:
+            try:
+                with gbm_path.open("rb") as f:
+                    self._gbm = pickle.load(f)  # noqa: S301
+                with bias_path.open("rb") as f:
+                    self._linear = pickle.load(f)  # noqa: S301
+                self._load_failed = False
+                logger.info("market_model_loaded_from_disk")
+                return
+            except Exception as exc:
+                # A lightgbm/xgboost artifact unpickled in the slim image (which
+                # installs neither) lands here.
+                self._gbm = self._linear = None
+                logger.error(
+                    "market_model_artifact_unloadable",
+                    error=str(exc),
+                    hint="Delete model_artifacts/ to retrain, or install "
+                         "requirements-ml.txt for the matching boosting library.",
+                )
+                return
+
+        try:
             logger.info("market_model_not_found_training_on_real_data")
             self._train_model(gbm_path, bias_path)
+            self._load_failed = False
+        except Exception as exc:
+            # No artifacts and no market-data connectivity: keep serving with
+            # _heuristic_predict rather than failing every signal request.
+            self._gbm = self._linear = None
+            logger.error("market_model_training_failed_using_heuristic", error=str(exc))
 
     # ── Real training-data builder ─────────────────────────────────────────────
 
@@ -264,7 +316,6 @@ class MarketImpactModel:
         y_vol     : (n_samples,) binary — 1 if next-day |SPY return| > 1.5× 20d σ
         y_bias    : (n_samples,) float  — next-day SPY return scaled to ~(-1, 1)
         """
-        import pandas as pd
         import yfinance as yf
 
         logger.info("fetching_real_training_data", tickers=["SPY", "^VIX", "USO"])
@@ -421,8 +472,11 @@ class MarketImpactModel:
         self._ensure_loaded()
         arr = np.array([features.to_array()])
 
-        vol_prob = float(self._gbm.predict_proba(arr)[0][1])
-        raw_bias = float(self._linear.predict(arr)[0])
+        if self._gbm is None or self._linear is None:
+            vol_prob, raw_bias = _heuristic_predict(features)
+        else:
+            vol_prob = float(self._gbm.predict_proba(arr)[0][1])
+            raw_bias = float(self._linear.predict(arr)[0])
         directional_bias = float(max(-1.0, min(1.0, raw_bias)))
 
         ss = _sector_stress(features.sector, features.geo_risk_vector)

@@ -74,8 +74,8 @@ class OandaConnector(BaseBrokerConnector):
             import oandapyV20  # type: ignore[import]
             env = "practice" if self.environment != "live" else "live"
             return oandapyV20.API(access_token=self.api_key, environment=env)
-        except ImportError:
-            raise RuntimeError("oandapyV20 not installed — run: pip install oandapyV20")
+        except ImportError as exc:
+            raise RuntimeError("oandapyV20 not installed — run: pip install oandapyV20") from exc
 
     def _sync_place_order(self, instrument: str, units: int) -> dict:
         """Synchronous OANDA order — called via asyncio.to_thread."""

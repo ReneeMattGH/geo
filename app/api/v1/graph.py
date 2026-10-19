@@ -1,7 +1,7 @@
 """Impact Graph endpoints — shock propagation and graph data."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 
 from app.schemas.backtest import (
     AssetExposureResponse,

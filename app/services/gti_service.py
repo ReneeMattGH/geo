@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from app.core.audit import build_audit_meta
-from app.core.database import get_db_session
 from app.core.logging import get_logger
 from app.models.gti import GTISnapshot
 from app.pipelines.gti_engine import get_gti_engine

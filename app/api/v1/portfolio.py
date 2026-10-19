@@ -11,8 +11,7 @@ from app.core.database import get_db
 from app.core.logging import get_logger
 from app.pipelines.market_model import get_impact_model, AssetFeatures
 from app.pipelines.simulators import Holding as SimHolding
-from app.pipelines.simulators import PortfolioSimulator, ScenarioShock
-from app.pipelines.gti_engine import get_gti_engine
+from app.pipelines.simulators import PortfolioSimulator
 from app.repositories.gti_repo import GTIRepository
 from app.repositories.persistence_repo import UserPortfolioRepository
 from app.services.persistence_service import PortfolioPersistenceService
@@ -507,7 +506,6 @@ async def execute_portfolio_trades(
     if req.dry_run:
         # Evaluate only — determine action without calling broker
         from app.trading.executor import TradeDecision
-        from datetime import UTC, datetime
         decisions_out = []
         for sig in signals:
             action = manager._determine_action(sig)
@@ -565,7 +563,7 @@ async def portfolio_pnl(
     Realized P&L comes from the ``pnl`` column set when a position is closed.
     """
     from datetime import UTC, datetime
-    from sqlalchemy import select, and_
+    from sqlalchemy import select
     from app.models.trade import TradeLog
 
     stmt = (

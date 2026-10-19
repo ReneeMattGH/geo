@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timedelta, UTC
-from uuid import UUID
+from datetime import datetime
 
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert

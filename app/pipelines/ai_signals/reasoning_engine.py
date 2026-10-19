@@ -5,7 +5,6 @@ combining geopolitical events, macro strength, and market sentiment.
 """
 from __future__ import annotations
 
-from typing import Any
 from app.pipelines.feature_engineering import EnhancedAssetFeatures
 from app.pipelines.ai_signals.multi_model_engine import ModelOutput
 from app.core.logging import get_logger

@@ -54,7 +54,7 @@ async def model_status(db: AsyncSession = Depends(get_db)) -> ModelStatusRespons
 
     from app.repositories.event_repo import EventRepository
     event_repo = EventRepository(db)
-    from sqlalchemy import select, func
+    from sqlalchemy import select
     from app.models.ingestion import IngestionRun
     from sqlalchemy import desc
     result = await db.execute(

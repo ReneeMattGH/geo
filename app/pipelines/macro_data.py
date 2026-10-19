@@ -6,8 +6,7 @@ using the FRED (Federal Reserve Economic Data) API.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import datetime
 
 import httpx
 from pydantic import BaseModel

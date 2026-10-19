@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from app.core.logging import get_logger
-from app.pipelines.gti_engine import GTIEngine, _decay_factor
+from app.pipelines.gti_engine import GTIEngine
 from app.pipelines.market_model import AssetFeatures, MarketImpactModel
 
 logger = get_logger(__name__)

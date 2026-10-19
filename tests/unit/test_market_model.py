@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from unittest import mock
 
 from app.pipelines.market_model import (
     FEATURE_SCHEMA,
+    _heuristic_predict,
     AssetFeatures,
     AssetImpactResult,
-    BrierScoreTracker,
     MarketImpactModel,
     _recommendation,
     _sector_stress,
@@ -272,3 +273,73 @@ class TestRealMarketAdapterKeyRotation:
         adapter._keys = ["k1", "k2"]
         effective = len(adapter._keys) * _FINNHUB_RATE_LIMIT
         assert effective == 120
+
+
+# ── Degraded model availability (fresh deploy / slim image) ──────────────────
+
+class TestModelAvailabilityFallback:
+    """A deploy has no pickled artifacts in the image, may have no boosting
+    library, and may not reach yfinance. None of that may 500 the endpoint."""
+
+    def _features(self, **overrides) -> AssetFeatures:
+        base = dict(
+            symbol="GLD", sector="metals", region="global",
+            gti_value=45.0, gti_delta_1h=3.0, gti_confidence=0.65,
+            realized_vol=0.14, return_1d=-0.005, return_5d=0.02,
+            sector_gti_weight=0.55, oil_shock=0.015, regime_vix_proxy=0.28,
+            rsi_14=0.58, macd_signal_diff=0.003, bb_pct_b=0.61,
+        )
+        base.update(overrides)
+        return AssetFeatures(**base)
+
+    def test_heuristic_is_bounded(self) -> None:
+        vol_prob, bias = _heuristic_predict(self._features())
+        assert 0.0 <= vol_prob <= 1.0
+        assert -1.0 <= bias <= 1.0
+
+    def test_heuristic_rises_with_stress(self) -> None:
+        calm_vol, _ = _heuristic_predict(self._features(
+            gti_value=5.0, gti_delta_1h=0.1, realized_vol=0.08, regime_vix_proxy=0.1))
+        crisis_vol, _ = _heuristic_predict(self._features(
+            gti_value=90.0, gti_delta_1h=8.0, realized_vol=0.55, regime_vix_proxy=0.85))
+        assert crisis_vol > calm_vol
+
+    def test_predict_survives_missing_artifacts_and_no_network(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "app.pipelines.market_model.get_settings",
+            lambda: type("S", (), {"model_artifacts_dir": tmp_path})(),
+        )
+        model = MarketImpactModel()
+        with mock.patch.object(
+            MarketImpactModel,
+            "_build_real_training_data",
+            side_effect=RuntimeError("yfinance unreachable"),
+        ):
+            result = model.predict(self._features())
+        assert result.recommendation in {"Buy", "Sell", "Hold"}
+        assert 0.0 <= result.vol_spike_prob_24h <= 1.0
+
+    def test_unpicklable_artifact_falls_back_instead_of_raising(self, tmp_path, monkeypatch) -> None:
+        (tmp_path / "vol_spike_lgbm.pkl").write_bytes(b"not a pickle")
+        (tmp_path / "directional_bias_ridge.pkl").write_bytes(b"not a pickle")
+        monkeypatch.setattr(
+            "app.pipelines.market_model.get_settings",
+            lambda: type("S", (), {"model_artifacts_dir": tmp_path})(),
+        )
+        result = MarketImpactModel().predict(self._features())
+        assert -1.0 <= result.directional_bias <= 1.0
+
+    def test_failed_load_is_not_retried_every_request(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "app.pipelines.market_model.get_settings",
+            lambda: type("S", (), {"model_artifacts_dir": tmp_path})(),
+        )
+        model = MarketImpactModel()
+        with mock.patch.object(
+            MarketImpactModel,
+            "_build_real_training_data",
+            side_effect=RuntimeError("yfinance unreachable"),
+        ) as trainer:
+            model.predict(self._features())
+            model.predict(self._features())
+        assert trainer.call_count == 1

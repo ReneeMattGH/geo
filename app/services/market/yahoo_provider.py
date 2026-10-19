@@ -157,7 +157,7 @@ class YahooProvider(BaseMarketProvider):
 
     # Pacing: at most MAX_CONCURRENCY in flight and one request per MIN_INTERVAL.
     MAX_CONCURRENCY = 4
-    MIN_INTERVAL = 0.12
+    MIN_INTERVAL = 0.25
     RETRY_BACKOFF = (0.8, 2.0)
     # A snapshot may be reused for this long when the upstream is unavailable.
     SNAPSHOT_TTL = 900.0
@@ -167,7 +167,7 @@ class YahooProvider(BaseMarketProvider):
     BATCH_COOLDOWN = 60.0
     # Circuit breaker: after this many consecutive failures, stop calling Yahoo
     # entirely for a while instead of retrying every symbol into a throttle.
-    FAILURE_THRESHOLD = 12
+    FAILURE_THRESHOLD = 6
     BREAKER_COOLDOWN = 45.0
 
     def __init__(self) -> None:
@@ -231,17 +231,22 @@ class YahooProvider(BaseMarketProvider):
                 try:
                     # A public endpoint can throttle an entire region. Bound the
                     # chart fallback so one provider cannot hold the aggregate API
-                    # open while later providers have usable quotes.
+                    # open while later providers have usable quotes. The bound has
+                    # to scale with the symbol count: starts are paced, so a flat
+                    # budget made a whole class report "unavailable" while its
+                    # requests were still in flight.
                     results = await asyncio.wait_for(
                         asyncio.gather(*tasks, return_exceptions=True),
-                        timeout=15.0,
+                        timeout=min(30.0, max(15.0, len(remaining) * self.MIN_INTERVAL + 4.0)),
                     )
                 except TimeoutError:
                     logger.warning(
-                        f"Yahoo chart fallback timed out for {asset_class}; "
-                        "returning cached/unavailable rows"
+                        f"Yahoo chart fallback timed out for {asset_class} "
+                        f"({len(remaining)} symbols); returning cached/unavailable rows"
                     )
-                    results = [None] * len(remaining)
+                    # wait_for cancelled the gather, so nothing is usable here;
+                    # every symbol falls through to snapshot/unavailable below.
+                    results = []
                 for symbol, result in zip(remaining, results):
                     if isinstance(result, MarketDataPoint):
                         points[symbol] = result

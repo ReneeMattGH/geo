@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, TYPE_CHECKING
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,6 +33,9 @@ from app.core.config import get_settings
 from app.core.database import dispose_engine
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+
+if TYPE_CHECKING:
+    from app.core.config import Settings
 
 logger = get_logger(__name__)
 
@@ -120,11 +123,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await feed_manager.stop()
         except Exception:
             pass
+
+    try:
+        from app.services.market import get_unified_market_service
+        get_unified_market_service().cancel_refreshes()
+    except Exception as exc:
+        logger.warning("market_refresh_cancel_failed", error=str(exc))
+
     logger.info("shutting_down")
     await dispose_engine()
 
 
-def _setup_otel(app: FastAPI, settings: "Settings") -> None:  # type: ignore[name-defined]
+def _setup_otel(app: FastAPI, settings: Settings) -> None:
     try:
         from opentelemetry import trace
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor

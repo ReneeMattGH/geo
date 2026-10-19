@@ -5,9 +5,7 @@ calculates mathematically derived confidence scores.
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from typing import Literal
 
 from app.pipelines.feature_engineering import EnhancedAssetFeatures
 from app.pipelines.ai_signals.multi_model_engine import ModelOutput

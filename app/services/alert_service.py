@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID
 
 import httpx
 
-from app.core.database import get_db_session
 from app.core.logging import get_logger
 from app.models.alert import AlertSubscription
 from app.repositories.market_repo import AlertRepository

@@ -52,7 +52,6 @@ _BINANCE_SYMBOL_MAP: dict[str, str] = {
     "AVAXUSDT":         "AVAXUSDT",
     "SHIBUSDT":         "SHIBUSDT",
     "TRXUSDT":          "TRXUSDT",
-    "DOTUSDT":          "DOTUSDT",
     # Canonical aliases used across the app
     "BINANCE:BTCUSDT":  "BTCUSDT",
     "BINANCE:ETHUSDT":  "ETHUSDT",

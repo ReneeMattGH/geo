@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,19 +18,88 @@ class Settings(BaseSettings):
     )
 
     # App
-    app_env: Literal["development", "staging", "production"] = "development"
+    app_env: Literal["development", "staging", "production"] = Field(
+        default="development",
+        validation_alias=AliasChoices("APP_ENV", "ENV"),
+    )
     app_version: str = "0.2.0"
     api_v1_str: str = "/api/v1"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     secret_key: SecretStr = Field(default="change-me-in-production")
     frontend_url: str = ""
 
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def _normalise_app_env(cls, v: object) -> object:
+        return v.strip().lower() if isinstance(v, str) else v
+
     # Database
     database_url: str = "postgresql+asyncpg://geotrade:geotrade_secret@localhost:5432/geotrade"
-    database_sync_url: str = "postgresql+psycopg2://geotrade:geotrade_secret@localhost:5432/geotrade"
+    database_sync_url: str = ""
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_pool_timeout: int = 30
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _force_async_driver(cls, v: object) -> object:
+        """Point the async engine at asyncpg and use its TLS argument names.
+
+        Managed Postgres providers (Render, Neon, Supabase) hand out bare
+        ``postgres://`` / ``postgresql://`` URLs carrying ``?sslmode=require``.
+        Two problems follow: SQLAlchemy resolves that scheme to the synchronous
+        psycopg2 driver ("the asyncio extension requires an async driver"), and
+        asyncpg has no ``sslmode`` keyword — only ``ssl`` — so the leftover
+        parameter would be sent to the server as a runtime setting and fail.
+        """
+        if not isinstance(v, str) or not v:
+            return v
+
+        if v.startswith(("postgres://", "postgresql://")):
+            scheme, _, rest = v.partition("://")
+            v = f"postgresql+asyncpg://{rest}"
+
+        prefix, sep, query = v.partition("?")
+        if sep:
+            pairs = [p for p in query.split("&") if p]
+            renamed = [
+                ("ssl" + p[len("sslmode"):]) if p.startswith("sslmode=") else p
+                for p in pairs
+            ]
+            v = prefix + "?" + "&".join(renamed) if renamed else prefix
+        return v
+
+    @field_validator("database_sync_url", mode="before")
+    @classmethod
+    def _default_sync_url(cls, v: object, info: ValidationInfo) -> object:
+        """Derive the psycopg2 URL used by Alembic when it is not set explicitly.
+
+        libpq wants ``sslmode`` where asyncpg wants ``ssl``, so the parameter is
+        renamed back for the synchronous URL that ``database_url`` was rewritten
+        for.
+        """
+        def as_psycopg2(url: str) -> str:
+            for driver in ("postgresql+asyncpg://", "postgresql://", "postgres://"):
+                if url.startswith(driver):
+                    url = "postgresql+psycopg2://" + url[len(driver):]
+                    break
+
+            prefix, sep, query = url.partition("?")
+            if not sep:
+                return url
+            pairs = [
+                ("sslmode=" + p[len("ssl="):]) if p.startswith("ssl=") else p
+                for p in query.split("&") if p
+            ]
+            return f"{prefix}?{'&'.join(pairs)}" if pairs else prefix
+
+        if isinstance(v, str) and v:
+            return as_psycopg2(v)
+
+        async_url = info.data.get("database_url", "")
+        if isinstance(async_url, str) and async_url:
+            return as_psycopg2(async_url)
+        return "postgresql+psycopg2://geotrade:geotrade_secret@localhost:5432/geotrade"
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"

@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI, Request, status
-from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 

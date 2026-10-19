@@ -1,0 +1,25 @@
+# GeoTrade — optional ML / NLP extras (NOT installed by the Docker image)
+#
+# The app imports all of these lazily behind `try/except ImportError`
+# (see app/pipelines/nlp_pipeline.py and app/pipelines/market_model.py), so the
+# API runs without them and logs the feature as unavailable instead of crashing.
+#
+# Install this file only on a host with the RAM/disk for it: torch alone is
+# ~2 GB and was the reason the Render image build kept failing.
+#
+#   pip install -r requirements-ml.txt
+#
+# torch and transformers versions below are the ones verified against this code.
+# The remaining entries are lower bounds because they are not exercised by the
+# default deployment — re-verify before relying on them in production.
+
+torch>=2.3.0
+transformers==5.20.1
+sentence-transformers>=3.0.0
+spacy>=3.7.0
+lightgbm>=4.0.0
+xgboost>=2.0.0
+
+# spaCy model used by app/pipelines/nlp_pipeline.py
+# installed separately because it is not a PyPI dependency:
+#   python -m spacy download en_core_web_sm

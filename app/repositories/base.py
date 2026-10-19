@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 from uuid import UUID
 
 from sqlalchemy import select

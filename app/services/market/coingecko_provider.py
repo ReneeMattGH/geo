@@ -131,7 +131,7 @@ class CoinGeckoProvider(BaseMarketProvider):
             # Return cached data if available, otherwise unavailable
             cached_results = self.get_all_cached()
             if cached_results:
-                logger.info(f"[CoinGecko] Returning cached data due to error")
+                logger.info("[CoinGecko] Returning cached data due to error")
                 return cached_results
             # Return unavailable for all symbols
             return [MarketDataPoint.unavailable(sym, "crypto", self.name) for sym in symbols]

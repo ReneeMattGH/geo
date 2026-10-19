@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
 import pytest
 
+from app.services.market import market_service
 from app.services.market.base_provider import MarketDataPoint
 from app.services.market.market_service import UnifiedMarketService
 
@@ -132,8 +136,9 @@ async def test_backfill_chains_fallbacks_in_order() -> None:
 
 
 @pytest.mark.asyncio
-async def test_backfill_marks_unpriceable_symbols_unavailable() -> None:
-    """Symbols no provider can price stay in the list, flagged as unavailable."""
+async def test_backfill_marks_unpriceable_symbols_unavailable(monkeypatch) -> None:
+    """Live-only mode: symbols no provider prices stay listed, flagged unavailable."""
+    monkeypatch.setattr(market_service, "get_settings", lambda: SimpleNamespace(market_data_live_only=True))
     service = UnifiedMarketService()
 
     async def fallback(missing):
@@ -144,6 +149,62 @@ async def test_backfill_marks_unpriceable_symbols_unavailable() -> None:
     assert [r.symbol for r in rows] == ["A", "B"]
     assert rows[1].status == "unavailable"
     assert rows[1].price == 0.0
+
+
+@pytest.mark.asyncio
+async def test_backfill_falls_back_to_synthetic_demo_quotes(monkeypatch) -> None:
+    """A keyless deploy serves every symbol, tagged so it cannot read as live."""
+    from app.pipelines import market_feeds
+
+    monkeypatch.setattr(market_service, "get_settings", lambda: SimpleNamespace(market_data_live_only=False))
+
+    class FakeFeed:
+        name = "synthetic"
+
+        async def fetch_latest(self, symbols):
+            return [
+                market_feeds.MarketTick(
+                    symbol=s, asset_class="equity", region="us",
+                    ts=datetime.now(UTC), open=99.0, high=101.0, low=98.0, close=100.0,
+                    volume=1000.0, return_1d=0.025,
+                )
+                for s in symbols
+            ]
+
+    monkeypatch.setattr(market_feeds, "get_market_feed", lambda: FakeFeed())
+
+    service = UnifiedMarketService()
+
+    async def fallback(missing):
+        return []
+
+    rows = await service._backfill(["A", "B"], [point("A", "stocks")], "stocks", fallback)
+
+    assert [r.symbol for r in rows] == ["A", "B"]
+    assert rows[1].status == "ok"
+    assert rows[1].price == 100.0
+    assert rows[1].change == 2.5
+    assert rows[1].source == "synthetic"
+    assert rows[1].data_status == "synthetic"
+
+
+@pytest.mark.asyncio
+async def test_real_feed_never_generates_synthetic_rows(monkeypatch) -> None:
+    """With a live provider configured, unpriced symbols are not fabricated."""
+    from app.pipelines import market_feeds
+
+    monkeypatch.setattr(market_service, "get_settings", lambda: SimpleNamespace(market_data_live_only=False))
+
+    class FakeFeed:
+        name = "finnhub"
+
+        async def fetch_latest(self, symbols):
+            raise AssertionError("must not be called")
+
+    monkeypatch.setattr(market_feeds, "get_market_feed", lambda: FakeFeed())
+
+    service = UnifiedMarketService()
+    assert await service._synthetic_rows(["A"], "stocks") == []
 
 
 @pytest.mark.asyncio
@@ -185,6 +246,60 @@ async def test_concurrent_callers_share_one_fetch(monkeypatch) -> None:
     await asyncio.gather(*(service._fetch_class("stocks") for _ in range(5)))
 
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_class_serves_previous_cycle_and_refreshes_off_request(monkeypatch) -> None:
+    """Past the TTL, the caller gets the old board and the fetch happens in background."""
+    import asyncio
+
+    service = UnifiedMarketService()
+    old_rows = [point("US10Y", "bonds", 4.2)]
+    service._class_cache["bonds"] = (asyncio.get_running_loop().time() - 10_000.0, old_rows)
+
+    started = asyncio.Event()
+
+    async def fake_bonds():
+        started.set()
+        await asyncio.sleep(0.01)
+        return [point("US10Y", "bonds", 4.5)]
+
+    monkeypatch.setattr(service, "_fetch_bonds", fake_bonds)
+
+    served = await service._fetch_class("bonds")
+    assert served == old_rows
+    await asyncio.sleep(0.001)  # the stale board returns before the refresh starts
+    assert started.is_set()
+
+    await asyncio.gather(*service._refresh_tasks.values())
+    refreshed = await service._fetch_class("bonds")
+    assert refreshed[0].price == 4.5
+
+
+@pytest.mark.asyncio
+async def test_cancel_refreshes_cancels_pending_background_fetch(monkeypatch) -> None:
+    """Shutdown must not leave refresh tasks holding provider connections."""
+    import asyncio
+
+    service = UnifiedMarketService()
+    old_rows = [point("AAPL", "stocks")]
+    service._class_cache["stocks"] = (asyncio.get_running_loop().time() - 10_000.0, old_rows)
+
+    async def slow_stocks():
+        await asyncio.sleep(30.0)
+        return [point("AAPL", "stocks", 250.0)]
+
+    monkeypatch.setattr(service, "_fetch_stocks", slow_stocks)
+
+    await service._fetch_class("stocks")
+    task = service._refresh_tasks["stocks"]
+
+    service.cancel_refreshes()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert task.cancelled()
+    assert service._refresh_tasks == {}
 
 
 @pytest.mark.asyncio

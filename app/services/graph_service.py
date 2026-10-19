@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.logging import get_logger
-from app.pipelines.impact_graph import ImpactGraph, PropagationResult, get_impact_graph
+from app.pipelines.impact_graph import ImpactGraph, get_impact_graph
 
 logger = get_logger(__name__)
 

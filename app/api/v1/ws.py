@@ -1,8 +1,6 @@
 """WebSocket endpoint for real-time updates."""
 from __future__ import annotations
 
-import asyncio
-from typing import Any
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 

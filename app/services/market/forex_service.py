@@ -4,7 +4,6 @@ Uses Twelve Data or Alpha Vantage for major/minor/cross pairs.
 """
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, UTC
 from typing import Any, Dict, List
 

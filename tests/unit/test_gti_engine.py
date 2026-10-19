@@ -11,8 +11,6 @@ from app.pipelines.gti_engine import (
     GTIEngine,
     _decay_factor,
     _sentiment_to_factor,
-    _confidences,
-    EventContribution,
 )
 
 

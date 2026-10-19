@@ -9,6 +9,7 @@ import asyncio
 from datetime import datetime, UTC
 from typing import Awaitable, Callable, Dict, List, Optional, Any
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.services.market.base_provider import MarketDataPoint
 from app.services.market.alpaca_provider import get_alpaca_provider
@@ -43,6 +44,12 @@ FETCH_TTL_OVERRIDES = {
 # price (tagged with a ':cached' source) beats blanking the asset out entirely.
 LAST_GOOD_TTL_SECONDS = 600.0
 
+# One provider chain per class may take this long before the service stops
+# waiting for it. Free-tier upstreams stall behind rate limits for minutes, and a
+# browser must not queue behind that; a class that exceeds the budget is served
+# from cache, demo rows, or marked unavailable for this cycle.
+CLASS_FETCH_TIMEOUT_SECONDS = 25.0
+
 
 class UnifiedMarketService:
     """Core service that coordinates all market data providers.
@@ -62,8 +69,6 @@ class UnifiedMarketService:
         self.fred = get_fred_provider()
         self.yahoo = get_yahoo_provider()
         self.finnhub = get_finnhub_provider()
-        self.forex_backup = get_forex_provider()  # For backup
-        self.commodities_backup = get_commodities_provider()  # For backup
 
         # In-memory cache for latest data
         self._cache: Dict[str, MarketDataPoint] = {}
@@ -72,6 +77,7 @@ class UnifiedMarketService:
         # Per-asset-class fetch cache: class -> (fetched_at, rows)
         self._class_cache: Dict[str, tuple[float, List[MarketDataPoint]]] = {}
         self._class_locks: Dict[str, asyncio.Lock] = {c: asyncio.Lock() for c in ASSET_CLASSES}
+        self._refresh_tasks: Dict[str, asyncio.Task] = {}
 
         # Last successfully priced row per symbol: symbol -> (fetched_at, point)
         self._last_good: Dict[str, tuple[float, MarketDataPoint]] = {}
@@ -203,15 +209,84 @@ class UnifiedMarketService:
         if cached is not None:
             return cached
 
+        # Past the TTL but fetched before: hand back the previous cycle at once
+        # and refresh it off the request path. Only the very first request for a
+        # class ever waits on upstream providers.
+        stale = self._class_cache.get(asset_class)
+        if stale is not None:
+            self._schedule_refresh(asset_class, fetchers[asset_class])
+            return stale[1]
+
         async with self._class_locks[asset_class]:
             # Another caller may have refreshed while we waited for the lock.
             cached = self._fresh_cache(asset_class)
             if cached is not None:
                 return cached
 
-            rows = await fetchers[asset_class]()
+            rows = await self._fetch_with_budget(asset_class, fetchers[asset_class])
             self._class_cache[asset_class] = (asyncio.get_running_loop().time(), rows)
             return rows
+
+    async def _fetch_with_budget(
+        self,
+        asset_class: str,
+        fetcher: Callable[[], Awaitable[List[MarketDataPoint]]],
+    ) -> List[MarketDataPoint]:
+        """Run one class fetch inside the shared time budget.
+
+        On the request path a timeout still has to return a full board, so the
+        class falls back to its backfill chain (cached prices, then demo rows).
+        """
+        try:
+            return await asyncio.wait_for(
+                fetcher(), timeout=CLASS_FETCH_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            logger.warning(
+                f"{asset_class}: providers exceeded "
+                f"{CLASS_FETCH_TIMEOUT_SECONDS:.0f}s; serving cached or demo rows"
+            )
+            return await self._backfill(self._symbols_for(asset_class), [], asset_class)
+
+    def _schedule_refresh(
+        self,
+        asset_class: str,
+        fetcher: Callable[[], Awaitable[List[MarketDataPoint]]],
+    ) -> None:
+        """Refresh one class in the background, at most one pass at a time.
+
+        A refresh that blows its budget keeps serving the previous cycle rather
+        than replacing real prices with a degraded board.
+        """
+        task = self._refresh_tasks.get(asset_class)
+        if task is not None and not task.done():
+            return
+
+        async def run() -> None:
+            async with self._class_locks[asset_class]:
+                if self._fresh_cache(asset_class) is not None:
+                    return
+                try:
+                    rows = await asyncio.wait_for(
+                        fetcher(), timeout=CLASS_FETCH_TIMEOUT_SECONDS
+                    )
+                except TimeoutError:
+                    logger.warning(
+                        f"{asset_class}: background refresh exceeded "
+                        f"{CLASS_FETCH_TIMEOUT_SECONDS:.0f}s; keeping previous rows"
+                    )
+                    return
+                self._class_cache[asset_class] = (asyncio.get_running_loop().time(), rows)
+
+        self._refresh_tasks[asset_class] = asyncio.create_task(
+            run(), name=f"market_refresh_{asset_class}"
+        )
+
+    def cancel_refreshes(self) -> None:
+        """Cancel pending background refreshes; called on application shutdown."""
+        for task in self._refresh_tasks.values():
+            task.cancel()
+        self._refresh_tasks.clear()
 
     def _fresh_cache(self, asset_class: str) -> Optional[List[MarketDataPoint]]:
         """Return cached rows for the class when still inside the TTL."""
@@ -372,14 +447,12 @@ class UnifiedMarketService:
             results = [MarketDataPoint.unavailable(sym, "indices", self.yahoo.name) for sym in symbols]
 
         live = {r.symbol: r for r in results if r.price > 0 and r.status == "ok"}
-        missing = [s for s in symbols if s not in live]
-        if missing:
-            derived = await self._derive_indices_from_etfs(missing)
-            for d in derived:
-                if d.price > 0:
-                    live[d.symbol] = d
-
-        return self._reindex(symbols, list(live.values()), "indices", self.yahoo.name)
+        return await self._backfill(
+            symbols,
+            list(live.values()),
+            "indices",
+            self._derive_indices_from_etfs,
+        )
 
     # Index → ETF proxy mapping for when Yahoo is unavailable.
     _INDEX_ETF_PROXY = {
@@ -413,7 +486,15 @@ class UnifiedMarketService:
         First checks the in-memory cache (populated by prior ETF fetches),
         then falls back to a Finnhub call only for ETFs not yet cached.
         """
-        proxied = [(sym, proxy_map[sym]) for sym in missing if sym in proxy_map]
+        proxied: list[tuple[str, str]] = []
+        for sym in missing:
+            etf_sym = proxy_map.get(sym)
+            if not etf_sym:
+                continue
+            cached = self._cache.get(etf_sym)
+            if cached is not None and cached.data_status == "synthetic":
+                continue
+            proxied.append((sym, etf_sym))
         if not proxied:
             return []
 
@@ -502,7 +583,57 @@ class UnifiedMarketService:
             except Exception as e:
                 logger.warning(f"{asset_class} fallback failed: {e}")
 
+        still_missing = [sym for sym in symbols if sym not in live]
+        for row in await self._synthetic_rows(still_missing, asset_class):
+            live[row.symbol] = row
+
         return self._reindex(symbols, list(live.values()), asset_class, self._source_for(asset_class))
+
+    async def _synthetic_rows(
+        self, missing: List[str], asset_class: str
+    ) -> List[MarketDataPoint]:
+        """Price unpriced symbols from the demo feed, when that is the feed.
+
+        A keyless public deployment has no upstream to fall back to, so the last
+        resort is the same seeded walk the background feed uses — the board stays
+        complete instead of blanking every class a throttled provider dropped.
+        Deployments with real keys never take this path, and
+        MARKET_DATA_LIVE_ONLY=true disables it outright.
+        """
+        if not missing or get_settings().market_data_live_only:
+            return []
+
+        # Imported lazily: the demo feed lives in the polling pipeline, and only
+        # this keyless last-resort path needs it.
+        from app.pipelines.market_feeds import get_market_feed
+
+        feed = get_market_feed()
+        if feed.name != "synthetic":
+            return []
+
+        ticks = {t.symbol: t for t in await feed.fetch_latest(missing)}
+        rows: List[MarketDataPoint] = []
+        for sym in missing:
+            tick = ticks.get(sym)
+            if tick is None or tick.close <= 0:
+                continue
+            rows.append(MarketDataPoint(
+                symbol=sym,
+                asset_class=asset_class,
+                price=round(float(tick.close), 6),
+                change=round(float(tick.return_1d or 0.0) * 100.0, 2),
+                timestamp=int(tick.ts.timestamp() * 1000),
+                source="synthetic",
+                volume=float(tick.volume),
+                high_24h=float(tick.high),
+                low_24h=float(tick.low),
+                open_24h=float(tick.open),
+                name=sym,
+                data_status="synthetic",
+            ))
+        if rows:
+            logger.info(f"{asset_class}: generated {len(rows)} synthetic demo quotes")
+        return rows
 
     def _reindex(
         self,

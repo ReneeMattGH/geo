@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.logging import get_logger
-from app.pipelines.backtesting import BacktestEngine, FullBacktestResult, get_backtest_engine
+from app.pipelines.backtesting import FullBacktestResult, get_backtest_engine
 from app.repositories.event_repo import EventRepository
 
 logger = get_logger(__name__)

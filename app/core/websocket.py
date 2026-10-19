@@ -14,14 +14,13 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
-import json
 from collections import defaultdict
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import uuid4
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 
 from app.core.logging import get_logger
 

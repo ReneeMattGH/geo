@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import UTC, datetime
-from uuid import uuid4
 
 from app.core.logging import get_logger
 from app.tasks.celery_app import celery_app
@@ -28,8 +26,6 @@ async def _async_run_news_ingestion() -> dict:
     from app.core.database import get_db_session
     from app.pipelines.ingestion_adapters import get_adapters
     from app.repositories.event_repo import EventRepository
-    from app.repositories.market_repo import AlertRepository
-    from app.models.ingestion import IngestionSource, IngestionRun
     from app.services.ingestion_service import IngestionService
 
     adapters = get_adapters()

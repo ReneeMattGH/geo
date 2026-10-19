@@ -5,7 +5,6 @@ and triggers AI signal recalculations.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, UTC
 from typing import Any, Dict, List
 
 from app.core.logging import get_logger

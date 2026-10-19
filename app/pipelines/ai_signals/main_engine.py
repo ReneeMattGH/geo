@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from app.core.logging import get_logger
 from app.pipelines.market_feeds import get_feed_manager

@@ -21,9 +21,14 @@ import app.models  # noqa: F401 — side-effect: registers all ORM models
 
 config = context.config
 
-# Override sqlalchemy.url from environment (asyncpg → psycopg2 for sync use)
-_db_url = os.getenv("DATABASE_SYNC_URL") or os.getenv("DATABASE_URL", "")
-_db_url = _db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+# Override sqlalchemy.url from the environment. Explicit env vars win; with none
+# set we fall back to the application settings, whose validators already give
+# Alembic a psycopg2 URL with the libpq spelling of the TLS parameter. Without
+# that fallback a fresh clone has no .env loaded here and `alembic upgrade head`
+# would receive an empty URL string.
+from app.core.config import get_settings
+
+_db_url = os.getenv("DATABASE_SYNC_URL") or get_settings().database_sync_url
 config.set_main_option("sqlalchemy.url", _db_url)
 
 if config.config_file_name is not None:

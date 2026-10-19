@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, patch
 import uuid
 from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from fastapi.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import JSON
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -24,7 +24,6 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 def _patch_models_for_sqlite() -> None:
     """Replace PostgreSQL-specific types with SQLite-compatible equivalents."""
     from sqlalchemy.dialects.postgresql import JSONB, ARRAY
-    import sqlalchemy as sa
 
     # Patch JSONB columns → JSON
     for table in Base.metadata.tables.values():

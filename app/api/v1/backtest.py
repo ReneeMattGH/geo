@@ -4,7 +4,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.audit import build_audit_meta
 from app.core.database import get_db
 from app.repositories.event_repo import EventRepository
 from app.schemas.backtest import (

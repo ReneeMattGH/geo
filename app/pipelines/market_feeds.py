@@ -1,15 +1,17 @@
-"""Market data feed adapters — live data only, no synthetic substitution.
+"""Market data feed adapters — live data with a labelled synthetic fallback.
 
 Architecture:
     MarketFeedAdapter   ← abstract base
-        └── RealMarketAdapter      ← Finnhub REST API (equities/ETFs/FX proxies)
-        └── BinanceCryptoAdapter   ← Binance public REST + WebSocket (crypto)
-    MarketFeedManager          ← 30-second polling loop + in-memory cache
-                               + Binance WebSocket listener (real-time crypto)
+        └── RealMarketAdapter        ← Finnhub REST API (equities/ETFs/FX proxies)
+        └── BinanceCryptoAdapter     ← Binance public REST + WebSocket (crypto)
+        └── SyntheticMarketAdapter   ← seeded random walk, no keys required
+    MarketFeedManager   ← 30-second polling loop + in-memory cache
+                        + Binance WebSocket listener (real-time crypto)
 
-Synthetic / demo data is permanently disabled. If Finnhub is unreachable the
-poller logs an error and retries on the next interval — stale data is served from
-cache rather than fabricated numbers.
+Without a FINNHUB_API_KEY the manager serves synthetic ticks tagged
+``source="synthetic"``. Set MARKET_DATA_LIVE_ONLY=true to refuse substitution and
+fail instead. If Finnhub is unreachable the poller logs an error and retries on
+the next interval — stale data is served from cache rather than fabricated.
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ import math
 import os
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -506,20 +508,193 @@ class RealMarketAdapter(MarketFeedAdapter):
             return []
 
 
-# ── (SyntheticMarketAdapter removed — live data only) ───────────────────────
-# Keeping class names below for any import compatibility; they now raise.
+# ── Synthetic adapter (keyless demo fallback) ─────────────────────────────────
 
-class SyntheticMarketAdapter:
-    """Removed. Synthetic data is permanently disabled."""
-    def __init__(self, *a: object, **kw: object) -> None:
-        raise RuntimeError(
-            "SyntheticMarketAdapter has been removed. "
-            "Set FINNHUB_API_KEY in .env for real market data."
+_CLASS_VOL: dict[str, float] = {
+    "equity": 0.22, "commodity": 0.28, "currency": 0.09, "bond": 0.08, "crypto": 0.75,
+}
+
+# Anchor levels for curated symbols that have no FINNHUB_SYMBOL_MAP entry —
+# equities, ETFs, index and yield-curve tickers, FX crosses, and soft
+# commodities. Only the synthetic demo feed reads these; without them every
+# unlisted instrument would walk around 100 and the demo board would look broken.
+_DEMO_BASES: dict[str, tuple[str, float]] = {
+    "LTC": ("crypto", 85.0), "AVAX": ("crypto", 30.0),
+    "RUT": ("equity", 2200.0), "DIA": ("equity", 425.0), "VTI": ("equity", 265.0),
+    "ARKK": ("equity", 43.0), "CAT": ("equity", 330.0),
+    "SENSEX": ("equity", 81000.0), "NIFTY": ("equity", 24300.0),
+    "STOXX50": ("equity", 5100.0),
+    # Without these the demo board would show the Nikkei beside the KOSPI.
+    "TSX": ("equity", 26000.0), "IBOV": ("equity", 130000.0),
+    "MEXBOL": ("equity", 55000.0), "KOSPI": ("equity", 2600.0),
+    "TWSE": ("equity", 23000.0), "STI": ("equity", 3800.0),
+    "JKSE": ("equity", 7500.0), "KLSE": ("equity", 1650.0),
+    "TA35": ("equity", 2100.0), "SMI": ("equity", 12000.0),
+    "US02Y": ("bond", 4.25), "US05Y": ("bond", 4.10), "US10Y": ("bond", 4.20),
+    "US30Y": ("bond", 4.40), "DE10Y": ("bond", 2.45), "GB10Y": ("bond", 4.45),
+    "IN10Y": ("bond", 6.55),
+    "HEATINGOIL": ("commodity", 2.55), "COTTON": ("commodity", 0.72),
+    "EURAUD": ("currency", 1.62), "EURCAD": ("currency", 1.51),
+    "EURCHF": ("currency", 0.935), "CADJPY": ("currency", 106.5),
+    "AUDJPY": ("currency", 107.2), "NZDJPY": ("currency", 94.5),
+    "CHFJPY": ("currency", 171.0), "GBPCHF": ("currency", 1.082),
+    "GBPAUD": ("currency", 2.03), "GBPCAD": ("currency", 1.84),
+    "AUDNZD": ("currency", 1.08), "AUDCAD": ("currency", 0.895),
+    "NZDCAD": ("currency", 0.905), "EURNZD": ("currency", 1.98),
+    "AUDCHF": ("currency", 0.55), "NZDCHF": ("currency", 0.51),
+    "CADCHF": ("currency", 0.60), "EURSEK": ("currency", 11.8),
+    "EURNOK": ("currency", 11.9), "USDSEK": ("currency", 9.5),
+    "USDNOK": ("currency", 10.6), "USDMXN": ("currency", 18.5),
+    "USDSGD": ("currency", 1.32), "USDHKD": ("currency", 7.8),
+    "USDCNH": ("currency", 7.25),
+    # Equities and ETFs outside the Finnhub map, at their rough trading level so
+    # the demo board does not price 38 mega-caps identically at $100.
+    "BRK.B": ("equity", 440.0), "AVGO": ("equity", 300.0), "TSM": ("equity", 200.0),
+    "V": ("equity", 310.0), "WMT": ("equity", 90.0), "UNH": ("equity", 600.0),
+    "MA": ("equity", 580.0), "HD": ("equity", 380.0), "PG": ("equity", 165.0),
+    "JNJ": ("equity", 155.0), "COST": ("equity", 950.0), "ABBV": ("equity", 190.0),
+    "NFLX": ("equity", 780.0), "KO": ("equity", 70.0), "CRM": ("equity", 260.0),
+    "PEP": ("equity", 170.0), "TMO": ("equity", 340.0), "ADBE": ("equity", 520.0),
+    "WFC": ("equity", 70.0), "CSCO": ("equity", 60.0), "MRK": ("equity", 115.0),
+    "TMUS": ("equity", 190.0), "AMD": ("equity", 160.0), "ACN": ("equity", 330.0),
+    "DIS": ("equity", 105.0), "ABT": ("equity", 110.0), "GE": ("equity", 200.0),
+    "VZ": ("equity", 42.0), "DHR": ("equity", 230.0), "TXN": ("equity", 190.0),
+    "NEE": ("equity", 80.0), "PM": ("equity", 105.0), "IBM": ("equity", 280.0),
+    "AMGN": ("equity", 300.0), "UBER": ("equity", 75.0), "BMY": ("equity", 60.0),
+    "PFE": ("equity", 28.0), "CMCSA": ("equity", 40.0),
+    "IWM": ("equity", 230.0), "VOO": ("equity", 520.0), "VEA": ("equity", 55.0),
+    "VWO": ("equity", 45.0), "XLP": ("equity", 85.0), "XLU": ("equity", 32.0),
+    "XLB": ("equity", 42.0), "XLC": ("equity", 90.0), "XBI": ("equity", 60.0),
+    "SMH": ("equity", 240.0), "SOXX": ("equity", 240.0), "VNQ": ("equity", 95.0),
+    "IYR": ("equity", 35.0), "EFA": ("equity", 95.0), "FXI": ("equity", 35.0),
+    "KWEB": ("equity", 40.0), "EWJ": ("equity", 60.0), "EWG": ("equity", 35.0),
+    "ORANGEJUICE": ("commodity", 2.10), "LEANHOGS": ("commodity", 1.05),
+    "LIVECATTLE": ("commodity", 1.75), "FEEDERCATTLE": ("commodity", 2.30),
+    "OATS": ("commodity", 3.50), "ROUGH_RICE": ("commodity", 15.0),
+    "SOYMEAL": ("commodity", 320.0), "SOYOIL": ("commodity", 0.80),
+    "LUMBER": ("commodity", 420.0),
+    # Yield-curve series: only used if FRED's public CSV is unreachable, and a
+    # 100% yield is the kind of error a reader notices immediately.
+    "US01M": ("bond", 4.60), "US03M": ("bond", 4.40), "US06M": ("bond", 4.30),
+    "US01Y": ("bond", 4.30), "US03Y": ("bond", 4.20), "US07Y": ("bond", 4.15),
+    "US20Y": ("bond", 4.70), "FEDFUNDS": ("bond", 4.30),
+    "US10Y2Y": ("bond", 0.40), "US10Y3M": ("bond", 0.30),
+    "TIPS05Y": ("bond", 1.90), "TIPS10Y": ("bond", 2.00),
+    "TIPS20Y": ("bond", 2.40), "TIPS30Y": ("bond", 2.60),
+    "SOFR": ("bond", 4.30), "PRIME": ("bond", 7.30),
+    "MORTGAGE30Y": ("bond", 6.60), "MORTGAGE15Y": ("bond", 5.90),
+    "AAA": ("bond", 4.20), "BAA": ("bond", 4.90),
+    "CORP": ("bond", 4.80), "HY": ("bond", 7.20),
+    "CORP_AAA": ("bond", 4.30), "CORP_AA": ("bond", 4.50),
+    "CORP_A": ("bond", 4.70), "CORP_BBB": ("bond", 5.10),
+}
+
+
+class SyntheticMarketAdapter(MarketFeedAdapter):
+    """Deterministic random-walk feed used when no live data keys are configured.
+
+    Prices are anchored to the per-symbol ``base`` in FINNHUB_SYMBOL_MAP and
+    evolved with a seeded geometric random walk, so a fresh deployment renders a
+    coherent, moving market instead of erroring. Every tick is tagged
+    ``source="synthetic"`` so it can never be mistaken for live data.
+
+    Disabled entirely by setting MARKET_DATA_LIVE_ONLY=true.
+    """
+    name = "synthetic"
+
+    def __init__(self) -> None:
+        self._last: dict[str, float] = {}
+        logger.warning(
+            "synthetic_market_adapter_active",
+            message="No live market-data keys configured — serving synthetic prices.",
+            hint="Set FINNHUB_API_KEY for real data, or MARKET_DATA_LIVE_ONLY=true to fail instead.",
         )
 
+    @staticmethod
+    def _meta(symbol: str) -> dict[str, Any]:
+        meta = FINNHUB_SYMBOL_MAP.get(symbol) or FINNHUB_SYMBOL_MAP.get(f"{symbol}USD")
+        if meta is not None:
+            return meta
+        klass, base = _DEMO_BASES.get(symbol, ("equity", 100.0))
+        return {"class": klass, "region": "global", "base": base}
 
-class _SyntheticStub:
-    name = "synthetic_disabled"
+    def _step(self, symbol: str, seconds_elapsed: float) -> tuple[float, float, dict[str, Any]]:
+        """Advance one symbol's walk and return (price, ann_vol, meta)."""
+        meta = self._meta(symbol)
+        base = float(meta["base"])
+        vol = _CLASS_VOL.get(str(meta["class"]), 0.22)
+        # Time-bucketed seed → same instant yields the same value for all callers,
+        # and the series drifts continuously instead of jumping per request.
+        bucket = int(time.time() // max(seconds_elapsed, 1.0))
+        rng = np.random.default_rng(abs(hash((symbol, bucket))) % (2**32))
+        dt = max(seconds_elapsed, 1.0) / (365.0 * 24 * 3600)
+        prev = self._last.get(symbol, base)
+        shock = float(rng.normal(0.0, vol * math.sqrt(dt)))
+        price = max(prev * math.exp(shock), base * 0.01)
+        self._last[symbol] = price
+        return price, vol, meta
+
+    async def fetch_latest(self, symbols: list[str]) -> list[MarketTick]:
+        now = datetime.now(UTC)
+        ticks: list[MarketTick] = []
+        for sym in symbols:
+            close, vol, meta = self._step(sym, 30.0)
+            spread = close * vol * math.sqrt(30.0 / (365.0 * 24 * 3600))
+            open_ = self._last.get(f"{sym}:open", close)
+            self._last.setdefault(f"{sym}:open", open_)
+            ticks.append(
+                MarketTick(
+                    symbol=sym,
+                    asset_class=str(meta["class"]),
+                    region=str(meta["region"]),
+                    ts=now,
+                    open=round(open_, 6),
+                    high=round(max(open_, close) + spread, 6),
+                    low=round(min(open_, close) - spread, 6),
+                    close=round(close, 6),
+                    volume=round(float(np.random.default_rng(
+                        abs(hash((sym, now.minute))) % (2**32)).uniform(1e5, 5e6)), 2),
+                    realized_vol=round(vol, 4),
+                    return_1d=round(float(np.random.default_rng(
+                        abs(hash((sym, "d1"))) % (2**32)).normal(0.0, vol / math.sqrt(252))), 6),
+                    return_5d=round(float(np.random.default_rng(
+                        abs(hash((sym, "d5"))) % (2**32)).normal(0.0, vol / math.sqrt(52))), 6),
+                    source=self.name,
+                )
+            )
+        return ticks
+
+    async def fetch_history(
+        self, symbol: str, start: datetime, end: datetime
+    ) -> list[MarketTick]:
+        meta = self._meta(symbol)
+        vol = _CLASS_VOL.get(str(meta["class"]), 0.22)
+        base = float(meta["base"])
+        days = max((end - start).days, 1)
+        rng = np.random.default_rng(abs(hash((symbol, "hist"))) % (2**32))
+        shocks = rng.normal(0.0, vol / math.sqrt(252), size=days)
+        prices = base * np.exp(np.cumsum(shocks))
+        ticks: list[MarketTick] = []
+        for i, close in enumerate(prices):
+            day = start + timedelta(days=i)
+            c = float(close)
+            band = c * vol / math.sqrt(252)
+            ticks.append(
+                MarketTick(
+                    symbol=symbol,
+                    asset_class=str(meta["class"]),
+                    region=str(meta["region"]),
+                    ts=day,
+                    open=round(c - band / 2, 6),
+                    high=round(c + band, 6),
+                    low=round(c - band, 6),
+                    close=round(c, 6),
+                    volume=round(float(rng.uniform(1e5, 5e6)), 2),
+                    realized_vol=round(vol, 4),
+                    source=self.name,
+                )
+            )
+        return ticks
 
 
 # ── Binance adapter (crypto, public REST — no API key) ────────────────────────
@@ -644,14 +819,14 @@ class BinanceCryptoAdapter(MarketFeedAdapter):
         for row in rows:
             try:
                 ts   = datetime.fromtimestamp(int(row[0]) / 1000, tz=UTC)
-                o, h, l, c, v = (float(row[i]) for i in (1, 2, 3, 4, 5))
+                o, h, low_, c, v = (float(row[i]) for i in (1, 2, 3, 4, 5))
                 ticks.append(MarketTick(
                     symbol=symbol,
                     asset_class="crypto",
                     region="global",
                     ts=ts,
                     open=round(o, 6), high=round(h, 6),
-                    low=round(l, 6),  close=round(c, 6),
+                    low=round(low_, 6),  close=round(c, 6),
                     volume=float(v),
                     realized_vol=0.65,
                     return_1d=None,
@@ -698,7 +873,17 @@ class MarketFeedManager:
         self._ws_mgr = ws_manager
 
     async def _run_discovery_once(self, force_refresh: bool = False) -> None:
-        """Run asset discovery once."""
+        """Run asset discovery once.
+
+        Skipped for the synthetic adapter: provider discovery returns hundreds of
+        micro-cap tickers, and a keyless demo that walks "$FARTBOY" alongside BTC
+        is worse than one that shows fewer, recognisable instruments.
+        """
+        if isinstance(self.adapter, SyntheticMarketAdapter):
+            self.symbols = list(DEFAULT_TRACKED_ASSETS)
+            logger.info("asset_discovery_skipped_synthetic_feed", total_symbols=len(self.symbols))
+            return
+
         try:
             logger.info("running_dynamic_asset_discovery")
             universe = await self.discovery_svc.get_asset_universe(force_refresh=force_refresh)
@@ -727,6 +912,10 @@ class MarketFeedManager:
 
         # Run initial discovery once to populate symbols before starting the poll
         await self._run_discovery_once()
+
+        # Prime the cache before the loop's first sleep so requests that arrive
+        # in the first poll_interval are not served an empty feed.
+        await self._poll_once()
 
         self._poll_task = asyncio.create_task(self._loop(), name="market_feed_poll_loop")
         self._discovery_task = asyncio.create_task(self._discovery_loop(), name="market_feed_discovery_loop")
@@ -805,7 +994,20 @@ class MarketFeedManager:
             for res in results:
                 if isinstance(res, list):
                     new_ticks.extend(res)
-            
+
+            # The engine services only know about provider-backed instruments,
+            # and any service that fails is swallowed above. Backfill the symbols
+            # they missed from the configured adapter (Finnhub, or the synthetic
+            # fallback) so a keyless deployment still serves a populated feed.
+            if len(new_ticks) < len(self.symbols):
+                try:
+                    covered = {t.symbol for t in new_ticks}
+                    missing = [s for s in self.symbols if s not in covered]
+                    if missing:
+                        new_ticks.extend(await self.adapter.fetch_latest(missing))
+                except Exception as exc:
+                    logger.warning("market_feed_adapter_backfill_failed", error=str(exc))
+
             for tick in new_ticks:
                 self._cache[tick.symbol] = tick
                 # Also handle symbol mapping if needed (e.g. for crypto aliases)
@@ -861,24 +1063,38 @@ class MarketFeedManager:
 
 # ── Singleton factory ─────────────────────────────────────────────────────────
 
-def _build_default_adapter() -> RealMarketAdapter | Any:
-    """Return the Finnhub live adapter with all configured keys for rotation.
+def _build_default_adapter() -> MarketFeedAdapter:
+    """Return the best available market-data adapter for the current config.
 
-    Raises RuntimeError if no FINNHUB_API_KEY is set — the system will not
-    start without a real data source.
+    Order of preference:
+      1. Finnhub, when at least one API key is configured.
+      2. SyntheticMarketAdapter, when no keys are set and the deployment has not
+         opted into live-only mode. Ticks are tagged ``source="synthetic"``.
+
+    Raises RuntimeError only when MARKET_DATA_LIVE_ONLY=true and no key exists,
+    so a keyless public deployment boots and serves instead of failing every
+    market request.
     """
-    keys = _load_finnhub_keys()
-    if not any(keys):
-        raise RuntimeError(
-            "FINNHUB_API_KEY is not set. Add it to .env — synthetic data is disabled."
+    from app.core.config import get_settings
+
+    keys = [k for k in _load_finnhub_keys() if k]
+    if keys:
+        adapter = RealMarketAdapter()   # reloads keys internally
+        logger.info(
+            "market_feed_live_adapter_ready",
+            key_count=len(adapter._keys),
+            key_prefixes=[k[:8] for k in adapter._keys],
         )
-    adapter = RealMarketAdapter()   # _load_finnhub_keys() called internally
-    logger.info(
-        "market_feed_live_adapter_ready",
-        key_count=len(adapter._keys),
-        key_prefixes=[k[:8] for k in adapter._keys],
-    )
-    return adapter
+        return adapter
+
+    if get_settings().market_data_live_only:
+        raise RuntimeError(
+            "MARKET_DATA_LIVE_ONLY=true but no FINNHUB_API_KEY is configured. "
+            "Set a live data key or disable live-only mode."
+        )
+
+    logger.warning("market_feed_using_synthetic", reason="no_finnhub_api_key")
+    return SyntheticMarketAdapter()
 
 
 _feed_manager: MarketFeedManager | None = None
@@ -896,6 +1112,11 @@ def get_feed_manager() -> MarketFeedManager:
     return _feed_manager
 
 
-def get_market_feed() -> RealMarketAdapter:
-    """Return the live Finnhub market feed adapter."""
-    return _build_default_adapter()
+def get_market_feed() -> MarketFeedAdapter:
+    """Return the adapter the background feed manager is polling.
+
+    Building a fresh adapter per call would restart the synthetic walk from its
+    anchor each time and open a second Finnhub websocket, so this shares the
+    manager's single instance.
+    """
+    return get_feed_manager().adapter

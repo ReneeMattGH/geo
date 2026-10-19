@@ -279,7 +279,6 @@ async def markets_news_ticker() -> Dict[str, Any]:
     """
     from app.services.market.market_service import get_unified_market_service
     from app.config.asset_universe import get_asset_universe
-    from datetime import timezone
 
     service = get_unified_market_service()
     universe = get_asset_universe()
@@ -312,11 +311,22 @@ async def markets_news_ticker() -> Dict[str, Any]:
         asset_def = universe.get_asset(sym)
         display_name = asset_def.name if asset_def else name or sym
         cat_label = category_labels.get(asset_class, asset_class.title())
+        data_status = (
+            dp_dict.get("data_status") if isinstance(dp_dict, dict)
+            else getattr(dp, "data_status", None)
+        )
 
-        # Compute implied deviation when provider reports no change.
-        # Only use assets with explicitly set base prices (not the 100.0 default).
-        # Cap at ±10% so long-term drifts don't swamp the ticker with false ALERTs.
-        if change == 0.0 and asset_def and asset_def.base_price > 0 and asset_def.base_price != 100.0:
+        # Derive a deviation from the seed price only for demo rows, whose random
+        # walk is defined relative to that seed. Live providers that simply do not
+        # report a 24h change (most FX crosses) must not have one invented for
+        # them: a stale seed made real quotes saturate the ±10% cap as fake ALERTs.
+        if (
+            change == 0.0
+            and data_status == "synthetic"
+            and asset_def
+            and asset_def.base_price > 0
+            and asset_def.base_price != 100.0
+        ):
             raw = ((price - asset_def.base_price) / asset_def.base_price) * 100
             change = round(max(-10.0, min(10.0, raw)), 2)
 
@@ -353,6 +363,23 @@ async def markets_news_ticker() -> Dict[str, Any]:
                 "price": price,
                 "urgency": urgency,
                 "sentiment": sentiment,
+                "source": source.split(":")[0],
+                "ts": now.isoformat(),
+            })
+        else:
+            # No 24h change from the provider: quote the level, claim no direction.
+            rate = f"{price:,.4f}" if price < 10 else f"{price:,.2f}"
+            headlines.append({
+                "id": f"mkt-{sym}",
+                "headline": f"{sym} {rate} · {display_name}",
+                "symbol": sym,
+                "category": cat_label,
+                "asset_class": asset_class,
+                "change_pct": None,
+                "abs_change": 0.0,
+                "price": price,
+                "urgency": "MARKET",
+                "sentiment": "flat",
                 "source": source.split(":")[0],
                 "ts": now.isoformat(),
             })
