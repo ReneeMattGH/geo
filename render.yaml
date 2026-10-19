@@ -157,6 +157,27 @@ services:
           name: geotrade-redis
           property: connectionString
 
+  # ── Frontend (static bundle) ────────────────────────────────────────────────
+  # Render can host the Vite output too, which keeps the whole deploy on one
+  # account and one pipeline. VITE_API_URL is deliberately NOT set here:
+  # frontend/src/shared/api/client.ts resolves to
+  # https://geotrade-api.onrender.com/api/v1 whenever the page is not served
+  # from localhost, which is this service's own .onrender.com host. If you
+  # rename geotrade-api or give it a custom domain, set VITE_API_URL to the
+  # new base including the /api/v1 prefix.
+  - type: web
+    name: geotrade-web
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 22                 # Vite 7 needs Node >= 20.19
+
 databases:
   - name: geotrade-db
     databaseName: geotrade

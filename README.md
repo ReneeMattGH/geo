@@ -77,28 +77,34 @@ lint/test/build.
 
 ## Deploy
 
-### Backend → Render (blueprint)
+`render.yaml` is a complete one-click stack: four services and two managed data
+stores.
 
-`render.yaml` defines three services and two managed data stores:
-
-| Service | Role | Notes |
+| Resource | Role | Notes |
 |---|---|---|
 | `geotrade-api` | FastAPI web service | Docker runtime, `./start.sh`, health check `/health` |
 | `geotrade-worker` | Celery worker | `ingestion,nlp,gti,market,default` queues |
 | `geotrade-beat` | Celery beat | schedules ingestion + GTI recomputation |
+| `geotrade-web` | Static frontend | `npm run build` in `frontend/`, serves `frontend/dist` with SPA fallback |
 | `geotrade-db` | Postgres | migrations apply automatically on boot |
 | `geotrade-redis` | Key/Value | broker + cache, internal network only |
 
-Steps:
+### Recommended: everything on Render
 
-1. Render → **New → Blueprint** → select this repo. All five resources are parsed
-   from `render.yaml`; review and create.
-2. Fill the `sync: false` secrets in the dashboard. They are all optional — leave
-   every provider key blank for a demo deployment.
-3. Set `FRONTEND_URL` to the exact Vercel origin (e.g. `https://geotrade.vercel.app`)
-   so CORS allows it. Blank falls back to permissive local origins only.
-4. Deploy. `start.sh` runs `alembic upgrade head` before uvicorn and logs a warning
-   instead of crash-looping if a migration fails.
+Vercel cannot host this backend — the API needs a long-lived process for its
+market-feed poll loop, the WebSocket broadcaster and Celery beat, none of which fit
+serverless functions. So Render always hosts the API, and the only real question is
+where the bundle is served. Keeping it on Render means one account, one pipeline, and
+no build-time coupling between the two.
+
+1. Render → **New → Blueprint** → select this repo. All six resources are parsed from
+   `render.yaml`; review and create.
+2. Fill the `sync: false` secrets in the dashboard. Every one is optional — leave the
+   provider keys blank for a demo deployment that serves labelled synthetic data.
+   `FRONTEND_URL` can stay blank: CORS already accepts any `*.onrender.com` origin.
+3. Open the `geotrade-web` URL once both builds finish. The frontend resolves the API
+   base itself (`frontend/src/shared/api/client.ts`), so no `VITE_API_URL` is needed
+   unless you rename `geotrade-api` or give it a custom domain.
 
 Keep every resource in **one region** — the services reach Postgres and Redis over
 Render's internal network. Render's managed Postgres has no TimescaleDB extension;
@@ -110,10 +116,12 @@ The API starts **one** uvicorn worker by default: each process runs its own
 market-feed poll loop and WebSocket broadcaster, so raise `WEB_CONCURRENCY` only if
 your provider rate limits scale with it.
 
-### Frontend → Vercel
+### Alternative: Render API + Vercel frontend
 
-`frontend/vercel.json` sets framework `vite`, build `npm run build`, output `dist`,
-SPA rewrites, and security headers.
+Only worth it if you want Vercel's edge CDN or per-branch preview deploys for the
+frontend. `frontend/vercel.json` sets framework `vite`, build `npm run build`, output
+`dist`, SPA rewrites and security headers. If you use this path, delete or ignore the
+`geotrade-web` service in `render.yaml` so you do not have two copies live.
 
 1. Vercel → **New Project** → import this repo → Root Directory = `frontend`.
 2. Environment variables — these are **build-time**: Vite inlines `VITE_*` into the
@@ -121,7 +129,8 @@ SPA rewrites, and security headers.
    - `VITE_API_URL=https://geotrade-api.onrender.com/api/v1` (include `/api/v1`)
    - `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` — only if you use the Supabase
      waitlist path; with them absent the waitlist posts through the backend instead.
-3. Deploy, then copy the origin into Render's `FRONTEND_URL` and redeploy the API.
+3. Deploy, then set Render's `FRONTEND_URL` to the exact Vercel origin and redeploy
+   the API.
 
 Never put a secret in a `VITE_` variable — it ships to every browser.
 
