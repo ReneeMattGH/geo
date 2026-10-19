@@ -1,11 +1,17 @@
-.PHONY: up down test lint migrate seed logs build shell
+.PHONY: up down test lint lint-fix migrate seed logs build shell secrets check format typecheck
 
 # --- Environment ---
 COMPOSE = docker compose
 APP_SERVICE = api
 WORKER_SERVICE = worker
 
-up:
+# docker-compose services declare `env_file: .env`, which is a hard error when the
+# file is absent. Create it from the template so a fresh clone can `make up`.
+.env:
+	cp .env.example .env
+	@echo "Created .env from .env.example — add provider keys if you have them."
+
+up: .env
 	$(COMPOSE) up -d --build
 	@echo "✅ GeoTrade stack is up. API: http://localhost:8000 | Flower: http://localhost:5555"
 
@@ -54,16 +60,30 @@ test-load:
 	pytest tests/load/ -v -s
 
 # --- Code quality ---
+# Check-only so `make lint` / CI never rewrites the working tree.
 lint:
-	ruff check app/ tests/ --fix
-	ruff format app/ tests/
-	mypy app/ --ignore-missing-imports
+	ruff check .
+
+lint-fix:
+	ruff check . --fix
+	ruff format app/ tests/ scripts/
 
 format:
-	ruff format app/ tests/
+	ruff format app/ tests/ scripts/
 
+# Optional and separate from `lint`: the codebase is not typed strictly enough to
+# gate on it, and mypy is not part of the slim install (`pip install mypy`).
 typecheck:
-	mypy app/
+	mypy app/ --ignore-missing-imports
+
+# Blocks committing a provider key. Runs on tracked files; add --all to also
+# cover untracked-but-not-ignored files.
+secrets:
+	python scripts/check_secrets.py --all
+
+# Everything CI runs, in one command.
+check: secrets lint test
+	cd frontend && npm ci && npm run lint && npm run test && npm run build
 
 # --- Alembic ---
 revision:

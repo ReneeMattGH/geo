@@ -1,24 +1,42 @@
 .git
+.gitignore
 .venv
-.venv311
+.venv*
 __pycache__
 *.pyc
 .pytest_cache
-htmlcov
-.coverage
 .mypy_cache
 .ruff_cache
+htmlcov
+.coverage
+coverage.xml
 model_artifacts
+
+# Never ship secrets or local env into the image
+.env
+.env.*
+!.env.example
+*.log
+
+# Frontend is deployed separately (Vercel); none of it belongs in the API image
 frontend/node_modules
 frontend/.svelte-kit
 frontend/dist
-.env
-.env.local
-.env.*.local
-*.log
+frontend/test-results
+frontend/playwright-report
+
+# Duplicated/stale trees that bloat the build context (repo cleanup in progress)
+frontend_old
+dist
+work
+geotrade.egg-info
+playwright-report
+test-results
+site-packages
+
+# Not needed at runtime
 tests
 docs
 *.md
-.gitignore
 README.md
 AGENTS.md

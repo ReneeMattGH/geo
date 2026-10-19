@@ -1,58 +1,80 @@
+# Render blueprint — GeoTrade
+#
+#   Render dashboard → New → Blueprint → point at this repo.
+#
+# Required env vars are declared with `sync: false`, which means Render creates
+# them as "secret" entries you must fill in once in the dashboard. Everything has
+# a working keyless default (see .env.example), so the API boots and serves
+# synthetic market data before you add any provider keys.
+#
+# TimescaleDB is NOT available on Render's managed Postgres. The migrations in
+# alembic/versions/ detect that and skip the hypertable conversion, so the schema
+# still applies as ordinary Postgres — you just lose time-bucket compression.
+# Use Crunchy Data or Neon with the TimescaleDB extension if you need it.
+
 services:
-  # ── FastAPI Backend ───────────────────────────────────────────────────────────
+  # ── FastAPI backend ─────────────────────────────────────────────────────────
   - type: web
     name: geotrade-api
     runtime: docker
-    dockerfilePath: infra/docker/Dockerfile
+    dockerfilePath: ./infra/docker/Dockerfile
     dockerContext: .
+    buildFilter:
+      paths:
+        - app/**
+        - alembic/**
+        - requirements.txt
+        - infra/docker/Dockerfile
     dockerCommand: ./start.sh
-    plan: standard          # upgrade to standard for more RAM (ML models need ~1 GB)
-    region: oregon
+    plan: standard              # 1 GB RAM; the slim image has no torch in it
+    region: oregon              # keep all services in ONE region so the
+                                # internal Redis + Postgres network applies
     healthCheckPath: /health
+    autoDeployTrigger: commit
     envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
       - key: DATABASE_URL
-        fromDatabase:
-          name: geotrade-db
-          property: connectionString
-      - key: DATABASE_SYNC_URL
         fromDatabase:
           name: geotrade-db
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: geotrade-redis
           property: connectionString
       - key: CELERY_BROKER_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: geotrade-redis
           property: connectionString
       - key: CELERY_RESULT_BACKEND
         fromService:
-          type: redis
+          type: keyvalue
           name: geotrade-redis
           property: connectionString
-      - key: ENV
-        value: production
-      - key: LOG_LEVEL
-        value: INFO
-      # ── add secret env vars in the Render dashboard ──
+      - key: SECRET_KEY
+        generateValue: true
+      # ── set these in the dashboard; all optional ──
       - key: FINNHUB_API_KEY
         sync: false
       - key: FINNHUB_API_KEY_2
         sync: false
-      - key: ALPACA_API_KEY
-        sync: false
-      - key: ALPACA_SECRET_KEY
-        sync: false
       - key: TWELVEDATA_API_KEY
         sync: false
-      - key: NEWSAPI_KEY
+      - key: ALPHAVANTAGE_API_KEY
         sync: false
       - key: FRED_API_KEY
         sync: false
-      - key: ALPHAVANTAGE_API_KEY
+      - key: NEWSAPI_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
         sync: false
       - key: SUPABASE_URL
         sync: false
@@ -60,97 +82,95 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      # Must be the exact Vercel origin, e.g. https://geotrade.vercel.app
       - key: FRONTEND_URL
-        sync: false   # set to your Vercel URL e.g. https://geotrade.vercel.app
+        sync: false
+      # Leave false to keep the synthetic fallback for unconfigured providers
+      - key: MARKET_DATA_LIVE_ONLY
+        value: "false"
 
-  # ── Celery Worker ─────────────────────────────────────────────────────────────
+  # ── Celery worker ───────────────────────────────────────────────────────────
   - type: worker
     name: geotrade-worker
     runtime: docker
-    dockerfilePath: infra/docker/Dockerfile
-    dockerContext: .
-    dockerCommand: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q ingestion,nlp,gti,default
+    dockerfilePath: ./infra/docker/Dockerfile
+    dockerTarget: worker
+    dockerCommand: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q ingestion,nlp,gti,market,default
     plan: standard
     region: oregon
     envVars:
+      - key: APP_ENV
+        value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: geotrade-db
-          property: connectionString
-      - key: DATABASE_SYNC_URL
         fromDatabase:
           name: geotrade-db
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: geotrade-redis
           property: connectionString
       - key: CELERY_BROKER_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: geotrade-redis
           property: connectionString
       - key: CELERY_RESULT_BACKEND
         fromService:
-          type: redis
+          type: keyvalue
           name: geotrade-redis
           property: connectionString
-      - key: ENV
-        value: production
       - key: FINNHUB_API_KEY
-        sync: false
-      - key: FINNHUB_API_KEY_2
-        sync: false
-      - key: ALPACA_API_KEY
-        sync: false
-      - key: TWELVEDATA_API_KEY
         sync: false
       - key: NEWSAPI_KEY
         sync: false
 
-  # ── Celery Beat Scheduler ─────────────────────────────────────────────────────
+  # ── Celery beat scheduler ───────────────────────────────────────────────────
   - type: worker
     name: geotrade-beat
     runtime: docker
-    dockerfilePath: infra/docker/Dockerfile
-    dockerContext: .
+    dockerfilePath: ./infra/docker/Dockerfile
+    dockerTarget: worker
     dockerCommand: celery -A app.tasks.celery_app beat --loglevel=info
-    plan: standard
+    plan: starter
     region: oregon
     envVars:
+      - key: APP_ENV
+        value: production
       - key: DATABASE_URL
         fromDatabase:
           name: geotrade-db
           property: connectionString
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: geotrade-redis
           property: connectionString
       - key: CELERY_BROKER_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: geotrade-redis
           property: connectionString
       - key: CELERY_RESULT_BACKEND
         fromService:
-          type: redis
+          type: keyvalue
           name: geotrade-redis
           property: connectionString
-      - key: ENV
-        value: production
 
 databases:
-  # ── TimescaleDB ───────────────────────────────────────────────────────────────
-  # Note: Render does not natively support TimescaleDB.
-  # Use the free tier of Neon (https://neon.tech) or Supabase for Postgres,
-  # or provision a custom Docker-based Postgres on Render.
   - name: geotrade-db
     databaseName: geotrade
     user: geotrade
-    plan: free            # upgrade for persistence beyond 90 days
+    plan: free                  # free tier is reset after inactivity; upgrade
+                                # before pointing real users at it
 
-  # ── Redis ─────────────────────────────────────────────────────────────────────
-  - name: geotrade-redis
+  - type: keyvalue
+    name: geotrade-redis
     plan: free
+    region: oregon
+    # The API and workers connect through the internal connectionString, which is
+    # unauthenticated by design and is not gated by this list. This entry only
+    # exists to satisfy the blueprint schema while keeping the external endpoint
+    # closed to the public internet.
+    ipAllowList:
+      - 127.0.0.1/32

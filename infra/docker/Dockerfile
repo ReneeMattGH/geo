@@ -1,51 +1,52 @@
+# syntax=docker/dockerfile:1
+#
+# GeoTrade backend image.
+#
+# Installs requirements.txt only — deliberately NOT the torch/transformers/spaCy
+# stack. Those are imported lazily behind try/except ImportError, so the API
+# boots and serves without them; ~2 GB of ML wheels was what made the hosted
+# build run out of memory and fail. Add them with requirements-ml.txt on a host
+# that has the RAM for it.
+
 FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=0 \
+    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_DEFAULT_TIMEOUT=100 \
     PYTHONIOENCODING=UTF-8
 
 WORKDIR /app
 
-# Install build dependencies for pandas, numpy, and other C-extension packages
+# libpq for psycopg2, libgomp for numpy/scipy OpenMP, curl for the health probe.
+# build-essential is only needed by the builder stage below.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    g++ \
-    gcc \
-    python3-dev \
-    libpq-dev \
+    libpq5 \
     libgomp1 \
     curl \
-    git \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Upgrade pip and install build tools
-RUN pip install --upgrade pip setuptools wheel
+# Install dependencies before copying source so this layer is cached on rebuilds.
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY pyproject.toml .
+COPY . .
 
-# Install ONLY production deps with optimizations for build environments
-# Use --prefer-binary to avoid building from source when possible
-# Set memory limit for numpy build
-RUN pip install --prefer-binary --no-cache-dir -e "." || \
-    pip install --no-cache-dir -e "."
+# Run as an unprivileged user; Render's web services ignore USER but this keeps
+# local/container scans quiet and prevents accidental writes to site-packages.
+RUN useradd --create-home --uid 10001 geotrade && chown -R geotrade:geotrade /app
+USER geotrade
 
-# Download spaCy model
-RUN python -m spacy download en_core_web_sm
-
-# Clean up to reduce image size
-RUN pip cache purge
+ENV PORT=8000
 
 # ---- API target ----
 FROM base AS api
-COPY . .
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=5 \
+    CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers ${WEB_CONCURRENCY:-1}"]
 
 # ---- Worker target ----
 FROM base AS worker
-COPY . .
 CMD ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=4", "-Q", "ingestion,nlp,gti,default"]
