@@ -18,13 +18,12 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.core.logging import configure_logging, get_logger
-from app.models.event import Event, EventCluster
+from app.models.event import Event
 from app.models.gti import GTISnapshot
 from app.models.market import MarketData
-from app.models.signal import MarketSignal, ModelVersion
+from app.models.signal import ModelVersion
 from app.models.ingestion import IngestionSource
 
 configure_logging()
