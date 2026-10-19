@@ -1,16 +1,35 @@
+# ── Python ────────────────────────────────────────────────────────────────────
 .venv
 .venv*
 __pycache__/
-*.pyc
-node_modules/
+*.py[cod]
+*.egg-info/
+build/
+dist/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 model_artifacts/
-frontend.zip
-# Environment files - block actual .env but allow example template
-.env
-.env.local
-.env.production
-!.env.example
 
+# ── Node / frontend ───────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend.zip
+
+# ── Secrets: never commit a real env file ─────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Local scratch, logs and OS noise ──────────────────────────────────────────
+*.log
+work/
 .DS_Store
 prompts.txt
