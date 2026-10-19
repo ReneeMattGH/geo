@@ -90,6 +90,8 @@ export function dataStatusLabel(dataStatus: string | undefined): string {
         case 'delayed': return 'DELAYED'
         case 'stale': return 'STALE'
         case 'unavailable': return 'UNAVAILABLE'
+        // Keyless deploy: generated walk, not a real quote.
+        case 'synthetic': return 'DEMO'
         default: return dataStatus?.toUpperCase() ?? 'LIVE'
     }
 }
@@ -101,6 +103,8 @@ export function dataStatusColor(dataStatus: string | undefined): string {
         case 'delayed': return 'text-amber-400'
         case 'stale': return 'text-orange-400'
         case 'unavailable': return 'text-red-400'
+        // Never render demo data in the same green as a live quote.
+        case 'synthetic': return 'text-gray-400'
         default: return 'text-green-400'
     }
 }

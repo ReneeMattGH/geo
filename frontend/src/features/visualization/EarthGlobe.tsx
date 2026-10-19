@@ -174,9 +174,12 @@ export function EarthGlobe({ gti }: { gti: any }) {
                 ref={globeEl}
                 width={w}
                 height={h}
-                globeImageUrl="//cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg"
-                bumpImageUrl="//cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png"
-                backgroundImageUrl="//cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png"
+                // Scheme-relative URLs inherit the page scheme, so on http://localhost
+                // these resolved to http:// and jsdelivr returned them without CORS
+                // headers — the globe rendered as a black sphere.
+                globeImageUrl="https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg"
+                bumpImageUrl="https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png"
+                backgroundImageUrl="https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png"
                 atmosphereColor="#00d4ff"
                 atmosphereAltitude={0.10}
                 showAtmosphere

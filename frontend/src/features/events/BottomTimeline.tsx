@@ -8,7 +8,7 @@ interface Headline {
     symbol: string
     category: string
     asset_class: string
-    change_pct: number
+    change_pct: number | null
     abs_change: number
     price: number
     urgency: string
@@ -27,8 +27,9 @@ const URGENCY_STYLE: Record<string, { badge: string; text: string }> = {
 function TickerItem({ item }: { item: Headline }) {
     const style = URGENCY_STYLE[item.urgency] ?? URGENCY_STYLE.MARKET
     const isPositive = item.sentiment === 'bullish' || item.sentiment === 'hawkish'
-    const changeColor = isPositive ? 'text-emerald-400' : 'text-red-400'
-    const changeBg = isPositive ? 'bg-emerald-500/10' : 'bg-red-500/10'
+    const hasMove = item.change_pct !== null
+    const changeColor = !hasMove ? 'text-gray-400' : isPositive ? 'text-emerald-400' : 'text-red-400'
+    const changeBg = !hasMove ? 'bg-white/5' : isPositive ? 'bg-emerald-500/10' : 'bg-red-500/10'
 
     return (
         <span className="inline-flex items-center gap-2.5 whitespace-nowrap mx-6">
@@ -38,9 +39,11 @@ function TickerItem({ item }: { item: Headline }) {
             <span className={`text-[13px] font-mono tracking-wide leading-none ${style.text}`}>
                 {item.headline}
             </span>
-            <span className={`text-[12px] font-mono font-bold px-1.5 py-0.5 rounded ${changeColor} ${changeBg}`}>
-                {item.change_pct >= 0 ? '+' : ''}{item.change_pct.toFixed(2)}%
-            </span>
+            {item.change_pct !== null && (
+                <span className={`text-[12px] font-mono font-bold px-1.5 py-0.5 rounded ${changeColor} ${changeBg}`}>
+                    {item.change_pct >= 0 ? '+' : ''}{item.change_pct.toFixed(2)}%
+                </span>
+            )}
             <span className="text-[10px] font-mono text-gray-500">
                 {item.category}
             </span>

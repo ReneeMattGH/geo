@@ -8,6 +8,10 @@ export default defineConfig({
         environment: 'jsdom',
         globals: true,
         setupFiles: './src/setupTests.ts',
+        // Playwright specs live in tests/ and are run by `npm run e2e`; without
+        // this they are picked up by vitest and fail under the jsdom runner.
+        include: ['src/**/*.{test,spec}.{ts,tsx}'],
+        exclude: ['**/node_modules/**', 'tests/**', 'dist/**', 'frontend_old/**'],
         alias: {
             '@': path.resolve(__dirname, './src'),
         }

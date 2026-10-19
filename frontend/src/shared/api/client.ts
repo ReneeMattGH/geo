@@ -1,10 +1,12 @@
 import { GTIResponseSchema, SignalsResponseSchema, EventsResponseSchema, type GTIResponse, type SignalsResponse, type EventsResponse } from './schemas'
 import { fallbackGTI, fallbackEvents, fallbackGlobeCountries, fallbackMarketImpact } from './mockData'
 
-// Fallback for production when VITE_API_URL isn't available at build (e.g. Vercel env not passed)
-const RENDER_API = 'https://geotrade-8pei.onrender.com/api/v1'
+// VITE_API_URL must be set in the Vercel dashboard as a *build* environment
+// variable — Vite inlines it at build time and vercel.json cannot supply it.
+// The fallback matches the Render service name in render.yaml (`geotrade-api`).
+const PROD_API = 'https://geotrade-api.onrender.com/api/v1'
 const defaultBase = typeof window !== 'undefined' && !/localhost|127\.0\.0\.1/.test(window.location.hostname)
-  ? RENDER_API
+  ? PROD_API
   : 'http://localhost:8000/api/v1'
 export const API_BASE = (import.meta.env.VITE_API_URL as string)?.trim() || defaultBase
 

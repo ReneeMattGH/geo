@@ -4,8 +4,9 @@ import { CheckCircle2, AlertCircle, Loader2, Sparkles, Send } from 'lucide-react
 import { API_BASE } from '@/shared/api/client'
 import { setStoredEmail } from '@/shared/auth/useAuth'
 
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string) || 'https://qvpcktrfbtzhivoksqzp.supabase.co'
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string) || ''
 const SUPABASE_ANON = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || ''
+const USE_DIRECT_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_ANON)
 
 interface WaitlistFormProps {
     onClose: () => void
@@ -62,7 +63,7 @@ export function WaitlistForm({ onClose, onSuccess }: WaitlistFormProps) {
         setStatus('loading')
         setMessage('')
 
-        const addFn = SUPABASE_ANON ? addToWaitlistDirect : addToWaitlistApi
+        const addFn = USE_DIRECT_SUPABASE ? addToWaitlistDirect : addToWaitlistApi
         try {
             const result = await addFn(email.trim())
             if (result.success) {

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 
 test('check console errors on clicking trading', async ({ page }) => {
     const errors: string[] = [];

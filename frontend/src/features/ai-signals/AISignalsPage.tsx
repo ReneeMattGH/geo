@@ -175,10 +175,11 @@ export function AISignalsPage() {
       switch (sortBy) {
         case 'confidence':
           return b.confidence_pct - a.confidence_pct
-        case 'change':
+        case 'change': {
           const aChange = a.live_change_pct || 0
           const bChange = b.live_change_pct || 0
           return Math.abs(bChange) - Math.abs(aChange)
+        }
         case 'volatility':
           return b.vol_spike_prob - a.vol_spike_prob
         default:

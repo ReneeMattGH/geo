@@ -1,25 +1,41 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CheckCircle2 } from 'lucide-react'
 import { TopBar } from '@/features/visualization/TopBar'
 import { LeftPanel } from '@/features/scenario/LeftPanel'
 import { RightPanel } from '@/features/signals/RightPanel'
 import { BottomTimeline } from '@/features/events/BottomTimeline'
-import { EarthGlobe } from '@/features/visualization/EarthGlobe'
-import { DeckGLMap } from '@/features/visualization/DeckGLMap'
-import TradingCharts from '@/features/visualization/TradingCharts'
-import { WaitlistForm } from '@/features/waitlist/WaitlistForm'
-import { PortfolioTracker } from '@/features/portfolio/PortfolioTracker'
-import { LandingPage } from '@/features/landing/LandingPage'
 import { useGti, useLivePrices, useSignals } from '@/shared/api/hooks'
 import { useStore } from '@/shared/state/store'
 import { useAuth, setStoredEmail } from '@/shared/auth/useAuth'
+
+// Each view below pulls in a multi-hundred-kilobyte rendering library
+// (three.js for the globe, deck.gl/maplibre for the map). Importing them
+// statically made every visitor download all of them on first paint; lazy
+// loading fetches only the chunk for the mode actually being shown.
+const EarthGlobe = lazy(() => import('@/features/visualization/EarthGlobe').then(m => ({ default: m.EarthGlobe })))
+const DeckGLMap = lazy(() => import('@/features/visualization/DeckGLMap').then(m => ({ default: m.DeckGLMap })))
+const TradingCharts = lazy(() => import('@/features/visualization/TradingCharts'))
+const PortfolioTracker = lazy(() => import('@/features/portfolio/PortfolioTracker').then(m => ({ default: m.PortfolioTracker })))
+const LandingPage = lazy(() => import('@/features/landing/LandingPage').then(m => ({ default: m.LandingPage })))
+const WaitlistForm = lazy(() => import('@/features/waitlist/WaitlistForm').then(m => ({ default: m.WaitlistForm })))
 
 const PAGE_TRANSITION = {
     initial: { opacity: 0, scale: 1.03 },
     animate: { opacity: 1, scale: 1 },
     exit: { opacity: 0, scale: 0.97 },
     transition: { duration: 0.35, ease: 'easeInOut' as const },
+}
+
+function ViewFallback() {
+    return (
+        <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+                <div className="w-8 h-8 rounded-full border-2 border-white/15 border-t-white/70 animate-spin" />
+                <p className="font-mono text-[10px] tracking-widest text-white/40">LOADING</p>
+            </div>
+        </div>
+    )
 }
 
 function App() {
@@ -105,27 +121,37 @@ function App() {
                 <AnimatePresence mode="wait">
                     {isLandingMode && (
                         <motion.div key="landing" className="absolute inset-0" {...PAGE_TRANSITION}>
-                            <LandingPage />
+                            <Suspense fallback={<ViewFallback />}>
+                                <LandingPage />
+                            </Suspense>
                         </motion.div>
                     )}
                     {isGlobeMode && (
                         <motion.div key="globe" className="absolute inset-0" {...PAGE_TRANSITION}>
-                            <EarthGlobe gti={gtiData} />
+                            <Suspense fallback={<ViewFallback />}>
+                                <EarthGlobe gti={gtiData} />
+                            </Suspense>
                         </motion.div>
                     )}
                     {isMapMode && (
                         <motion.div key="map" className="absolute inset-0" {...PAGE_TRANSITION}>
-                            <DeckGLMap />
+                            <Suspense fallback={<ViewFallback />}>
+                                <DeckGLMap />
+                            </Suspense>
                         </motion.div>
                     )}
                     {isChartsMode && (
                         <motion.div key="charts" className="absolute inset-0" {...PAGE_TRANSITION}>
-                            <TradingCharts />
+                            <Suspense fallback={<ViewFallback />}>
+                                <TradingCharts />
+                            </Suspense>
                         </motion.div>
                     )}
                     {isPortfolioMode && (
                         <motion.div key="portfolio" className="absolute inset-0" {...PAGE_TRANSITION}>
-                            <PortfolioTracker />
+                            <Suspense fallback={<ViewFallback />}>
+                                <PortfolioTracker />
+                            </Suspense>
                         </motion.div>
                     )}
                 </AnimatePresence>
@@ -164,12 +190,14 @@ function App() {
                             exit={{ scale: 0.95, opacity: 0, y: 20 }}
                             className="bg-[#0a0f1e]/95 border border-white/20 rounded-2xl shadow-2xl relative w-full max-w-md overflow-hidden"
                         >
-                            <WaitlistForm
-                                onClose={() => setWaitlistOpen(false)}
-                                onSuccess={(registeredEmail: string) => {
-                                    setStoredEmail(registeredEmail)
-                                }}
-                            />
+                            <Suspense fallback={<div className="w-full h-64" />}>
+                                <WaitlistForm
+                                    onClose={() => setWaitlistOpen(false)}
+                                    onSuccess={(registeredEmail: string) => {
+                                        setStoredEmail(registeredEmail)
+                                    }}
+                                />
+                            </Suspense>
                         </motion.div>
                     </motion.div>
                 )}

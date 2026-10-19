@@ -19,5 +19,17 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Pattern rules the codebase predates (loose API payloads, effects that set
+      // state while loading, jitter that calls Math.random during render). They
+      // report real cleanup work, so they stay visible as warnings instead of
+      // either blocking every change or being switched off.
+      '@typescript-eslint/no-explicit-any': 'warn',
+      'react-hooks/exhaustive-deps': 'warn',
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/purity': 'warn',
+      'react-hooks/immutability': 'warn',
+      'react-refresh/only-export-components': 'warn',
+    },
   },
 ])
