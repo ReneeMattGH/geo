@@ -397,16 +397,18 @@ export function PortfolioTracker() {
                                             animate={{ opacity: 1, y: 0 }}
                                             exit={{ opacity: 0, y: -10 }}
                                             transition={{ duration: 0.15 }}
-                                            className="flex items-center justify-between p-3 rounded-lg bg-[#07091a]/60 border border-white/5 hover:border-white/20 hover:bg-white/5 transition-all group"
+                                            className="flex items-center justify-between p-3 rounded-lg bg-[#07091a]/60 border border-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] hover:border-white/20 hover:bg-white/5 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-all duration-200 group"
                                         >
                                             <div className="flex items-center gap-3 min-w-0 flex-1">
-                                                <div className="flex-shrink-0 min-w-0">
-                                                    <span className="text-white font-bold text-xs">{asset.symbol}</span>
+                                                <div className="flex items-center flex-shrink-0 min-w-0">
+                                                    <span className="inline-flex items-center rounded-md bg-white/[0.055] border border-white/[0.08] px-1.5 py-[3px] text-white font-mono font-semibold text-[10px] leading-none tracking-[0.08em] group-hover:border-purple-400/30 transition-colors">
+                                                        {asset.symbol}
+                                                    </span>
                                                     {asset.name && asset.name !== asset.symbol && (
-                                                        <span className="text-gray-500 text-[10px] ml-1">{asset.name}</span>
+                                                        <span className="text-gray-500 text-[10px] ml-2 group-hover:text-gray-400 transition-colors">{asset.name}</span>
                                                     )}
                                                 </div>
-                                                <span className={`px-2 py-0.5 rounded text-[9px] font-semibold border ${CATEGORY_COLORS[asset.asset_class]}`}>
+                                                <span className={`px-2 py-0.5 rounded text-[9px] font-semibold tracking-wide border ${CATEGORY_COLORS[asset.asset_class]}`}>
                                                     {CATEGORY_LABELS[asset.asset_class] || asset.asset_class}
                                                 </span>
                                                 {asset.source && (
@@ -427,16 +429,16 @@ export function PortfolioTracker() {
                                             </div>
                                             <div className="flex items-center gap-3 flex-shrink-0">
                                                 <div className="text-right">
-                                                    <p className="text-white font-mono text-xs">
+                                                    <p className="text-white font-mono text-xs tabular-nums tracking-tight">
                                                         {formatPrice(asset.price, asset.asset_class)}
                                                     </p>
-                                                    <p className={`text-[10px] font-mono ${asset.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                    <p className={`text-[10px] font-mono font-medium tabular-nums ${asset.change >= 0 ? 'text-green-400/90' : 'text-red-400/90'}`}>
                                                         {formatChange(asset.change)}
                                                     </p>
                                                 </div>
                                                 <button
                                                     onClick={() => addAsset(asset)}
-                                                    className="p-2 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-400 hover:bg-purple-500/30 hover:border-purple-500/50 transition-all flex-shrink-0"
+                                                    className="p-2 rounded-lg bg-purple-500/15 border border-purple-500/25 text-purple-300 hover:bg-purple-500/25 hover:border-purple-400/50 hover:text-purple-200 transition-all duration-200 flex-shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
                                                     title="Add to portfolio"
                                                 >
                                                     <Plus className="w-4 h-4" />
@@ -462,24 +464,25 @@ export function PortfolioTracker() {
                         
                         {/* Portfolio Stats */}
                         <div className="space-y-3">
-                            <div className="p-3 rounded-lg bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20">
-                                <p className="text-[9px] uppercase tracking-widest text-gray-500 mb-1">Total Value</p>
-                                <p className="text-xl font-bold text-white font-mono">
-                                    ${portfolioStats.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            <div className="p-3 rounded-lg bg-gradient-to-br from-purple-500/[0.13] to-pink-500/[0.09] border border-purple-500/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                                <p className="text-[9px] font-medium uppercase tracking-[0.18em] text-purple-100/45 mb-1">Total Value</p>
+                                <p className="text-[20px]/[28px] font-bold text-white font-mono tabular-nums tracking-tight">
+                                    <span className="text-[13px] font-medium leading-none text-white/45 mr-0.5">$</span>
+                                    {portfolioStats.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                             </div>
                             
                             <div className="grid grid-cols-2 gap-2">
-                                <div className="p-3 rounded-lg bg-[#07091a]/80 border border-white/10">
-                                    <p className="text-[9px] uppercase tracking-widest text-gray-500 mb-1">Total P/L</p>
-                                    <p className={`text-sm font-bold font-mono ${portfolioStats.totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                <div className={`p-3 rounded-lg bg-[#07091a]/80 border border-white/10 border-t shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${portfolioStats.totalPnL >= 0 ? 'border-t-green-400/30' : 'border-t-red-400/30'}`}>
+                                    <p className="text-[9px] font-medium uppercase tracking-[0.18em] text-gray-500 mb-1">Total P/L</p>
+                                    <p className={`text-[15px] leading-[20px] font-semibold font-mono tabular-nums tracking-tight ${portfolioStats.totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                         {portfolioStats.totalPnL >= 0 ? '+' : ''}${portfolioStats.totalPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </p>
                                 </div>
-                                <div className="p-3 rounded-lg bg-[#07091a]/80 border border-white/10">
-                                    <p className="text-[9px] uppercase tracking-widest text-gray-500 mb-1">P/L %</p>
-                                    <p className={`text-sm font-bold font-mono ${portfolioStats.totalPnLPercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                        {portfolioStats.totalPnLPercent >= 0 ? '+' : ''}{portfolioStats.totalPnLPercent.toFixed(2)}%
+                                <div className={`p-3 rounded-lg bg-[#07091a]/80 border border-white/10 border-t shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${portfolioStats.totalPnLPercent >= 0 ? 'border-t-green-400/30' : 'border-t-red-400/30'}`}>
+                                    <p className="text-[9px] font-medium uppercase tracking-[0.18em] text-gray-500 mb-1">P/L %</p>
+                                    <p className={`text-[15px] leading-[20px] font-semibold font-mono tabular-nums tracking-tight ${portfolioStats.totalPnLPercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        {portfolioStats.totalPnLPercent >= 0 ? '+' : ''}{portfolioStats.totalPnLPercent.toFixed(2)}<span className="text-[11px] font-medium leading-none opacity-60">%</span>
                                     </p>
                                 </div>
                             </div>
@@ -531,12 +534,14 @@ export function PortfolioTracker() {
                                                 animate={{ opacity: 1, x: 0 }}
                                                 exit={{ opacity: 0, x: -20 }}
                                                 transition={{ duration: 0.15 }}
-                                                className="p-3 rounded-lg bg-[#07091a]/80 border border-white/10 group"
+                                                className="p-3 rounded-lg bg-[#07091a]/80 border border-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] hover:border-white/15 transition-colors duration-200 group"
                                             >
                                                 <div className="flex items-center justify-between mb-2">
                                                     <div className="flex items-center gap-2">
-                                                        <span className="text-white font-bold text-xs">{holding.symbol}</span>
-                                                        <span className={`px-2 py-0.5 rounded text-[9px] font-semibold border ${CATEGORY_COLORS[holding.asset_class]}`}>
+                                                        <span className="inline-flex items-center rounded-md bg-white/[0.055] border border-white/[0.08] px-1.5 py-[3px] text-white font-mono font-semibold text-[10px] leading-none tracking-[0.08em] group-hover:border-purple-400/30 transition-colors">
+                                                            {holding.symbol}
+                                                        </span>
+                                                        <span className={`px-2 py-0.5 rounded text-[9px] font-semibold tracking-wide border ${CATEGORY_COLORS[holding.asset_class]}`}>
                                                             {CATEGORY_LABELS[holding.asset_class] || holding.asset_class}
                                                         </span>
                                                     </div>
@@ -550,25 +555,25 @@ export function PortfolioTracker() {
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-2 text-[10px]">
                                                     <div>
-                                                        <p className="text-gray-500">Quantity</p>
-                                                        <p className="text-white font-mono">{holding.quantity}</p>
+                                                        <p className="text-[9px] leading-[15px] uppercase tracking-wider text-gray-500">Quantity</p>
+                                                        <p className="text-white/95 font-mono tabular-nums">{holding.quantity}</p>
                                                     </div>
                                                     <div>
-                                                        <p className="text-gray-500">Avg Price</p>
-                                                        <p className="text-white font-mono">{formatPrice(holding.avg_price, holding.asset_class)}</p>
+                                                        <p className="text-[9px] leading-[15px] uppercase tracking-wider text-gray-500">Avg Price</p>
+                                                        <p className="text-white/95 font-mono tabular-nums">{formatPrice(holding.avg_price, holding.asset_class)}</p>
                                                     </div>
                                                     <div>
-                                                        <p className="text-gray-500">Current Price</p>
-                                                        <p className="text-white font-mono">{formatPrice(holding.current_price, holding.asset_class)}</p>
+                                                        <p className="text-[9px] leading-[15px] uppercase tracking-wider text-gray-500">Current Price</p>
+                                                        <p className="text-white/95 font-mono tabular-nums">{formatPrice(holding.current_price, holding.asset_class)}</p>
                                                     </div>
                                                     <div>
-                                                        <p className="text-gray-500">Total Value</p>
-                                                        <p className="text-white font-mono">${currentValue.toFixed(2)}</p>
+                                                        <p className="text-[9px] leading-[15px] uppercase tracking-wider text-gray-500">Total Value</p>
+                                                        <p className="text-white/95 font-mono tabular-nums">${currentValue.toFixed(2)}</p>
                                                     </div>
                                                 </div>
-                                                <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between">
-                                                    <span className="text-[9px] text-gray-500">Unrealized P/L</span>
-                                                    <span className={`text-[10px] font-mono font-semibold ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                <div className="mt-2 pt-2 border-t border-white/[0.06] flex items-center justify-between">
+                                                    <span className="text-[9px] uppercase tracking-wider text-gray-500">Unrealized P/L</span>
+                                                    <span className={`text-[10px] font-mono font-semibold tabular-nums ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                                         {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)
                                                     </span>
                                                 </div>
