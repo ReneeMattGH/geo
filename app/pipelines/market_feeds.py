@@ -1042,6 +1042,12 @@ class MarketFeedManager:
         """Return {symbol: close_price} for a list of symbols."""
         return {s: t.close for s in symbols if (t := self._cache.get(s))}
 
+    async def fetch_history(
+        self, symbol: str, start: datetime, end: datetime
+    ) -> list[MarketTick]:
+        """Return historical bars for one symbol via the active adapter."""
+        return await self.adapter.fetch_history(symbol, start, end)
+
     def snapshot(self) -> dict[str, dict]:
         """Return serializable snapshot of all cached ticks."""
         return {sym: tick.to_ws_dict() for sym, tick in self._cache.items()}
