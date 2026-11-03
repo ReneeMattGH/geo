@@ -8,6 +8,7 @@ import { BottomTimeline } from '@/features/events/BottomTimeline'
 import { useGti, useLivePrices, useSignals } from '@/shared/api/hooks'
 import { useStore } from '@/shared/state/store'
 import { useAuth, setStoredEmail } from '@/shared/auth/useAuth'
+import { usePreferencesSync } from '@/shared/settings/useSettings'
 
 // Each view below pulls in a multi-hundred-kilobyte rendering library
 // (three.js for the globe, deck.gl/maplibre for the map). Importing them
@@ -18,6 +19,7 @@ const DeckGLMap = lazy(() => import('@/features/visualization/DeckGLMap').then(m
 const TradingCharts = lazy(() => import('@/features/visualization/TradingCharts'))
 const PortfolioTracker = lazy(() => import('@/features/portfolio/PortfolioTracker').then(m => ({ default: m.PortfolioTracker })))
 const LandingPage = lazy(() => import('@/features/landing/LandingPage').then(m => ({ default: m.LandingPage })))
+const SettingsPage = lazy(() => import('@/features/settings/SettingsPage').then(m => ({ default: m.SettingsPage })))
 const WaitlistForm = lazy(() => import('@/features/waitlist/WaitlistForm').then(m => ({ default: m.WaitlistForm })))
 
 const PAGE_TRANSITION = {
@@ -43,6 +45,11 @@ function App() {
     const { data: gtiData } = useGti()
     const { data: signalsData } = useSignals()
     const { isRegistered } = useAuth()
+    const [, setIdentityVersion] = useState(0)
+
+    // Refresh the cached preferences from the account so the landing page,
+    // clock, and refresh interval reflect what was saved.
+    usePreferencesSync()
 
     // Mobile drawer state for LeftPanel
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -60,6 +67,7 @@ function App() {
     const isMapMode = mode === 'map'
     const isPortfolioMode = mode === 'portfolio'
     const isLandingMode = mode === 'landing'
+    const isSettingsMode = mode === 'settings'
     const showPanels = isGlobeMode || isMapMode
 
     // Filter signals based on active region + asset class filters
@@ -154,6 +162,13 @@ function App() {
                             </Suspense>
                         </motion.div>
                     )}
+                    {isSettingsMode && (
+                        <motion.div key="settings" className="absolute inset-0" {...PAGE_TRANSITION}>
+                            <Suspense fallback={<ViewFallback />}>
+                                <SettingsPage onRequestRegister={() => setWaitlistOpen(true)} />
+                            </Suspense>
+                        </motion.div>
+                    )}
                 </AnimatePresence>
             </div>
 
@@ -195,6 +210,7 @@ function App() {
                                     onClose={() => setWaitlistOpen(false)}
                                     onSuccess={(registeredEmail: string) => {
                                         setStoredEmail(registeredEmail)
+                                        setIdentityVersion(v => v + 1)
                                     }}
                                 />
                             </Suspense>

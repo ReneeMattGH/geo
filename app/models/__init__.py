@@ -6,6 +6,7 @@ from app.models.ingestion import IngestionRun, IngestionSource
 from app.models.market import MarketData
 from app.models.persistence import SimulationSnapshot, UserPortfolio
 from app.models.signal import MarketSignal, ModelVersion
+from app.models.settings import UserApiKey, UserSettings
 
 __all__ = [
     "AlertSubscription",
@@ -18,4 +19,6 @@ __all__ = [
     "AlertSubscription",
     "IngestionSource",
     "IngestionRun",
+    "UserApiKey",
+    "UserSettings",
 ]

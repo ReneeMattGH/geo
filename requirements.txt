@@ -25,6 +25,7 @@ slowapi==0.1.9
 pydantic==2.14.1
 pydantic-settings==2.16.0
 email-validator==2.3.0          # required by pydantic EmailStr in schemas
+cryptography==50.0.2            # AES-256-GCM vault for user-supplied provider keys
 
 # ── Database ─────────────────────────────────────────────────────────────────
 SQLAlchemy[asyncio]==2.1.5

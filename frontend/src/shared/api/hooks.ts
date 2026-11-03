@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
+import { useStore } from '@/shared/state/store'
 
 export const useGti = () => {
     return useQuery({
@@ -48,12 +49,14 @@ export const useEnhancedSignals = (region?: string) => {
 
 export const useLivePrices = (symbols: string[]) => {
     const uniqueSymbols = Array.from(new Set(symbols.map(s => s.toUpperCase()))).sort()
+    const refreshSeconds = useStore(s => s.preferences.refreshIntervalSeconds)
+    const intervalMs = Math.max(5000, refreshSeconds * 1000)
     return useQuery({
-        queryKey: ['live-prices', uniqueSymbols.join(',')],
+        queryKey: ['live-prices', uniqueSymbols.join(','), refreshSeconds],
         queryFn: () => api.getLivePrices(uniqueSymbols),
         enabled: uniqueSymbols.length > 0,
-        refetchInterval: 5000,
-        staleTime: 3000,
+        refetchInterval: intervalMs,
+        staleTime: Math.min(3000, intervalMs),
     })
 }
 
@@ -101,12 +104,18 @@ export const usePortfolioRisk = () => {
 // upstream is, so polling faster than this only returns the same payload.
 const MARKET_REFETCH_MS = 15000
 
+function useMarketRefetchMs() {
+    const refreshSeconds = useStore(s => s.preferences.refreshIntervalSeconds)
+    return Math.max(MARKET_REFETCH_MS, refreshSeconds * 1000)
+}
+
 export const useAllMarkets = () => {
+    const intervalMs = useMarketRefetchMs()
     return useQuery({
         queryKey: ['all-markets'],
         queryFn: api.getAllMarkets,
-        refetchInterval: MARKET_REFETCH_MS,
-        staleTime: MARKET_REFETCH_MS,
+        refetchInterval: intervalMs,
+        staleTime: intervalMs,
         // Keep the previous asset list on screen while a refetch is in flight.
         placeholderData: prev => prev,
     })
@@ -124,11 +133,12 @@ export const useNewsTicker = () => {
 
 export const useMarketsByClass = (assetClass: string) => {
     const normalized = assetClass.toLowerCase()
+    const intervalMs = useMarketRefetchMs()
     return useQuery({
         queryKey: ['markets', normalized],
         queryFn: () => api.getMarketsByClass(normalized),
-        refetchInterval: MARKET_REFETCH_MS,
-        staleTime: MARKET_REFETCH_MS,
+        refetchInterval: intervalMs,
+        staleTime: intervalMs,
         placeholderData: prev => prev,
     })
 }

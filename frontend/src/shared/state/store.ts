@@ -1,6 +1,11 @@
 import { create } from 'zustand'
+import {
+    readCachedPreferences,
+    writeCachedPreferences,
+    type Preferences,
+} from '@/shared/settings/preferences'
 
-export type VisualizationMode = 'landing' | 'globe' | 'map' | 'charts' | 'portfolio'
+export type VisualizationMode = 'landing' | 'globe' | 'map' | 'charts' | 'portfolio' | 'settings'
 export type SignalType = 'BUY' | 'SELL' | 'HOLD'
 export type AssetClass = 'Equities' | 'Bonds' | 'Commodities' | 'Forex' | 'Crypto'
 export type Region = 'North America' | 'Europe' | 'Asia Pacific' | 'Middle East' | 'Latin America' | 'Africa'
@@ -49,7 +54,13 @@ interface GeoTradeState {
     scenario: ScenarioParams
     updateScenario: (params: Partial<ScenarioParams>) => void
     runSimulation: () => void // placeholder for triggering re-calc
+
+    // Non-secret display preferences (mirrored to the account on the server)
+    preferences: Preferences
+    setPreferences: (prefs: Preferences) => void
 }
+
+const initialPreferences = readCachedPreferences()
 
 const defaultScenario: ScenarioParams = {
     oilPriceShock: 0,
@@ -60,7 +71,9 @@ const defaultScenario: ScenarioParams = {
 }
 
 export const useStore = create<GeoTradeState>((set) => ({
-    mode: "globe",
+    // The cached landing preference applies on first paint; the server copy
+    // refreshes the cache after it loads.
+    mode: initialPreferences.defaultLandingPage,
     setMode: (mode) => set({ mode }),
 
     selectedCountryIso: null,
@@ -93,5 +106,11 @@ export const useStore = create<GeoTradeState>((set) => ({
     runSimulation: () => {
         // Triggers global simulation recalculations in the actual UI.
         console.log("Simulation triggered with params.")
-    }
+    },
+
+    preferences: initialPreferences,
+    setPreferences: (preferences) => {
+        writeCachedPreferences(preferences)
+        set({ preferences })
+    },
 }))

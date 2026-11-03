@@ -16,6 +16,7 @@ import {
     RefreshCw, AlertCircle, X
 } from 'lucide-react'
 import { useMarketsByClass } from '@/shared/api/hooks'
+import { useStore } from '@/shared/state/store'
 import { formatPrice, formatChange, formatVolume, sourceLabel, isPriced, dataStatusLabel, dataStatusColor } from '@/shared/api/marketFormat'
 
 interface MarketAsset {
@@ -68,10 +69,13 @@ const CATEGORY_LABELS: Record<string, string> = {
 export function PortfolioTracker() {
     // Portfolio state
     const [portfolio, setPortfolio] = useState<PortfolioHolding[]>([])
+    const defaultAssetClass = useStore(state => state.preferences.defaultAssetClass)
     
     // UI state
     const [searchQuery, setSearchQuery] = useState('')
-    const [selectedCategory, setSelectedCategory] = useState<FilterCategory>('all')
+    const [selectedCategory, setSelectedCategory] = useState<FilterCategory>(
+        () => defaultAssetClass as FilterCategory
+    )
     const [sortBy, setSortBy] = useState<SortOption>('symbol')
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
     const { data: marketsData, isLoading, error, refetch } = useMarketsByClass(selectedCategory)

@@ -179,6 +179,12 @@ class Settings(BaseSettings):
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
 
+    # User-supplied provider credentials (BYOK). The AES-256-GCM master key is
+    # server-side only; user keys are never stored or returned in plaintext.
+    user_api_key_encryption_key: SecretStr = Field(default="")
+    user_key_validation_timeout: float = 10.0
+    user_key_quote_cache_ttl: int = 30
+
     @field_validator("model_artifacts_dir", mode="before")
     @classmethod
     def create_artifacts_dir(cls, v: str | Path) -> Path:

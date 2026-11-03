@@ -51,8 +51,11 @@ ALLOWED_VALUE = re.compile(
 )
 
 # A value that is a reference to something else, not a literal: `settings.x`,
-# `self.key`, `os.getenv("Y")`, `req.webhook_url`. Code, not a credential.
-VALUE_IS_REFERENCE = re.compile(r"(?ix)^(?:[a-z_][a-z0-9_]*\.)+[a-z_] | .*\(.*\)")
+# `self.key`, `os.getenv("Y")`, `req.webhook_url`, or a subscripted type
+# annotation such as `list[ApiKeyOut]`. Code, not a credential.
+VALUE_IS_REFERENCE = re.compile(
+    r"(?ix)^(?:[a-z_][a-z0-9_]*\.)+[a-z_] | .*\(.*\) | ^[A-Za-z_][A-Za-z0-9_]*\[.*\]$"
+)
 
 # Keys that hold the NAME of an env var rather than its value: `api_key_env`.
 NAME_ONLY_KEY = re.compile(r"(?i)(_env|_env_var|key_name|secret_name)$")

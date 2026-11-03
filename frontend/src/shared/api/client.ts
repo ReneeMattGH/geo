@@ -1,5 +1,6 @@
 import { GTIResponseSchema, SignalsResponseSchema, EventsResponseSchema, type GTIResponse, type SignalsResponse, type EventsResponse } from './schemas'
 import { fallbackGTI, fallbackEvents, fallbackGlobeCountries, fallbackMarketImpact } from './mockData'
+import { getStoredEmail } from '@/shared/auth/useAuth'
 
 // VITE_API_URL must be set in the Vercel dashboard as a *build* environment
 // variable — Vite inlines it at build time and vercel.json cannot supply it.
@@ -9,6 +10,14 @@ const defaultBase = typeof window !== 'undefined' && !/localhost|127\.0\.0\.1/.t
   ? PROD_API
   : 'http://localhost:8000/api/v1'
 export const API_BASE = (import.meta.env.VITE_API_URL as string)?.trim() || defaultBase
+
+// Identifies the account so the backend can route quotes through any keys the
+// user saved. It is an email, never a credential, and the header is only sent
+// when one is registered locally.
+function identityHeaders(): Record<string, string> {
+  const email = getStoredEmail()
+  return email ? { 'X-User-Email': email } : {}
+}
 
 function mapSignalV2ToLegacy(signal: any): any {
     return {
@@ -166,7 +175,10 @@ export const api = {
                 qs.set('symbols', symbols.join(','))
             }
             const url = `${API_BASE}/market/live${qs.toString() ? '?' + qs.toString() : ''}`
-            const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
+            const res = await fetch(url, {
+                headers: identityHeaders(),
+                signal: AbortSignal.timeout(5000),
+            })
             if (!res.ok) return {}
             const json = await res.json()
             const items = Array.isArray(json?.prices) ? json.prices : []
@@ -237,7 +249,10 @@ export const api = {
 
     getAllMarkets: async (): Promise<any> => {
         try {
-            const res = await fetch(`${API_BASE}/market/markets/all`, { signal: AbortSignal.timeout(25000) })
+            const res = await fetch(`${API_BASE}/market/markets/all`, {
+                headers: identityHeaders(),
+                signal: AbortSignal.timeout(25000),
+            })
             if (!res.ok) return null
             return res.json()
         } catch {
@@ -259,7 +274,10 @@ export const api = {
         try {
             const normalized = assetClass.toLowerCase()
             const path = normalized === 'all' ? 'all' : encodeURIComponent(normalized)
-            const res = await fetch(`${API_BASE}/market/markets/${path}`, { signal: AbortSignal.timeout(20000) })
+            const res = await fetch(`${API_BASE}/market/markets/${path}`, {
+                headers: identityHeaders(),
+                signal: AbortSignal.timeout(20000),
+            })
             if (!res.ok) return null
             return res.json()
         } catch {

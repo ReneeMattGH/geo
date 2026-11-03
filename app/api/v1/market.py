@@ -26,8 +26,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.identity import optional_user_email
+from app.core.logging import get_logger
 from app.pipelines.market_feeds import get_feed_manager, FINNHUB_SYMBOL_MAP
 from app.repositories.market_repo import MarketDataRepository
+from app.services.user_providers import ProviderQuote
+from app.services.user_settings import get_user_quote_overlay
 
 from app.services.market_engine import get_market_engine
 
@@ -45,6 +49,90 @@ from app.services.market import (
 )
 
 router = APIRouter(prefix="/market", tags=["market"])
+logger = get_logger(__name__)
+
+
+def _provider_quote_payload(quote: ProviderQuote) -> dict[str, Any]:
+    """Normalize a user-key quote into the feed's ``to_ws_dict`` shape."""
+    stamp = (
+        datetime.fromtimestamp(quote.timestamp / 1000, UTC)
+        if quote.timestamp
+        else datetime.now(UTC)
+    )
+    price = quote.price
+    return {
+        "symbol": quote.symbol,
+        "price": price,
+        "open": quote.open or price,
+        "high": quote.high or price,
+        "low": quote.low or price,
+        "change_pct": round(quote.change, 3),
+        "vol": None,
+        "source": quote.source,
+        "ts": stamp.isoformat(),
+        "asset_class": quote.asset_class,
+    }
+
+
+async def _overlay_quotes(
+    db: AsyncSession, email: str | None, symbols: list[str]
+) -> tuple[dict[str, dict[str, Any]], str | None]:
+    """Look up quotes from the caller's own provider keys, if any are saved."""
+    if not email or not symbols:
+        return {}, None
+    try:
+        quotes, label = await get_user_quote_overlay(db, email, symbols)
+    except Exception as exc:  # BYOK must never take the shared feed down
+        logger.warning("user_quote_overlay_failed", error=type(exc).__name__)
+        return {}, None
+    return {symbol: _provider_quote_payload(q) for symbol, q in quotes.items()}, label
+
+
+def _merge_quote_row(row: dict[str, Any], quote: dict[str, Any]) -> None:
+    """Replace a unified-market row's price fields with a user-key quote."""
+    stamp = datetime.fromisoformat(quote["ts"]) if quote.get("ts") else datetime.now(UTC)
+    row["price"] = quote["price"]
+    row["change"] = quote["change_pct"]
+    row["source"] = quote["source"]
+    row["timestamp"] = int(stamp.timestamp() * 1000)
+    row["high_24h"] = quote["high"]
+    row["low_24h"] = quote["low"]
+    row["open_24h"] = quote["open"]
+    row["status"] = "ok"
+    row["data_status"] = "live"
+
+
+async def _overlay_markets_payload(
+    db: AsyncSession, email: str | None, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Overlay user-key quotes onto a `/markets/*` payload, best effort."""
+    data = payload.get("data")
+    if isinstance(data, dict):
+        groups = [rows for rows in data.values() if isinstance(rows, list)]
+    elif isinstance(data, list):
+        groups = [data]
+    else:
+        return payload
+
+    symbols = [
+        str(row.get("symbol"))
+        for rows in groups
+        for row in rows
+        if isinstance(row, dict) and row.get("symbol")
+    ]
+    overlay, label = await _overlay_quotes(db, email, symbols)
+    if not overlay:
+        return payload
+
+    for rows in groups:
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            quote = overlay.get(str(row.get("symbol")))
+            if quote:
+                _merge_quote_row(row, quote)
+    payload["user_key_provider"] = label
+    return payload
 
 
 @router.get("/all")
@@ -97,36 +185,61 @@ async def get_latest_prices(
 @router.get("/live")
 async def get_live_prices(
     symbols: str | None = Query(default=None, description="Comma-separated symbols; omit for all"),
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Return real-time prices from the live feed cache.
 
     This endpoint reads from the in-memory MarketFeedManager cache that is
-    refreshed every 30 seconds. No DB call is made.
-    Source field indicates the upstream adapter (finnhub / binance:ws / binance:rest).
+    refreshed every 30 seconds. When the caller identifies an account that has
+    saved provider keys, quotes those providers support are overlaid on top;
+    everything else, and every failure, falls back to the shared feed.
+    Source field indicates the upstream adapter (finnhub / binance:ws / ...).
     """
     mgr  = get_feed_manager()
     all_ticks = mgr.get_all()
 
     if symbols:
-        sym_set = {s.strip().upper() for s in symbols.split(",")}
-        all_ticks = [t for t in all_ticks if t.symbol in sym_set]
+        wanted = [
+            s.strip().upper() for s in symbols.split(",") if s.strip()
+        ]
+        wanted_set = set(wanted)
+        all_ticks = [t for t in all_ticks if t.symbol in wanted_set]
+    else:
+        wanted = [t.symbol for t in all_ticks]
 
     data = [t.to_ws_dict() for t in all_ticks]
+    overlay, provider_label = await _overlay_quotes(db, email, wanted)
+    if overlay:
+        by_symbol = {row["symbol"]: row for row in data}
+        by_symbol.update(overlay)
+        data = list(by_symbol.values())
+
     data.sort(key=lambda d: d["symbol"])
 
     return {
-        "prices":      data,
-        "count":       len(data),
-        "data_source": "live_feed_manager",
-        "data_as_of":  datetime.now(UTC).isoformat(),
+        "prices":           data,
+        "count":            len(data),
+        "data_source":      "live_feed_manager",
+        "data_as_of":       datetime.now(UTC).isoformat(),
+        "user_key_provider": provider_label,
     }
 
 
 @router.get("/live/{symbol}")
-async def get_live_price_single(symbol: str) -> dict:
+async def get_live_price_single(
+    symbol: str,
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """Return the latest real-time quote for a single symbol."""
+    upper = symbol.upper()
+    overlay, provider_label = await _overlay_quotes(db, email, [upper])
+    if upper in overlay:
+        return {"symbol": upper, **overlay[upper], "user_key_provider": provider_label}
+
     mgr  = get_feed_manager()
-    tick = mgr.get_latest(symbol.upper())
+    tick = mgr.get_latest(upper)
 
     if tick is None:
         # Try fetching on demand if not yet in cache
@@ -136,15 +249,20 @@ async def get_live_price_single(symbol: str) -> dict:
         tick    = ticks[0] if ticks else None
 
     if tick is None:
-        meta = FINNHUB_SYMBOL_MAP.get(symbol.upper(), {})
+        meta = FINNHUB_SYMBOL_MAP.get(upper, {})
         return {
-            "symbol":  symbol.upper(),
+            "symbol":  upper,
             "price":   meta.get("base", 0),
             "source":  "not_found",
             "message": f"No live data for {symbol}. Is it in the tracked symbol list?",
+            "user_key_provider": provider_label,
         }
 
-    return {"symbol": tick.symbol, **tick.to_ws_dict()}
+    return {
+        "symbol": tick.symbol,
+        **tick.to_ws_dict(),
+        "user_key_provider": provider_label,
+    }
 
 
 @router.post("/refresh")
@@ -200,7 +318,10 @@ async def get_price_history(
 # =============================================================================
 
 @router.get("/markets/all", tags=["markets"])
-async def markets_all() -> Dict[str, Any]:
+async def markets_all(
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
     """Get all market data across all asset classes.
     
     Returns unified data from:
@@ -209,65 +330,89 @@ async def markets_all() -> Dict[str, Any]:
     - Forex (Twelve Data) - 10 major pairs
     - Commodities (Twelve Data) - Gold, Silver, Oil, etc.
     - Bonds (FRED) - Treasury yields
+
+    When the caller's account has provider keys for an asset class, those
+    quotes replace the shared ones for the supported symbols.
     """
-    return await get_all_markets_data()
+    return await _overlay_markets_payload(db, email, await get_all_markets_data())
 
 
 @router.get("/markets/stocks", tags=["markets"])
-async def markets_stocks() -> Dict[str, Any]:
+async def markets_stocks(
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
     """Get stock market data from Alpaca.
     
     Returns top 50 US equities with real-time prices.
     """
-    return await get_stocks()
+    return await _overlay_markets_payload(db, email, await get_stocks())
 
 
 @router.get("/markets/crypto", tags=["markets"])
-async def markets_crypto() -> Dict[str, Any]:
+async def markets_crypto(
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
     """Get cryptocurrency market data from CoinGecko.
     
     Returns top 50 cryptocurrencies with real-time prices.
     """
-    return await get_crypto()
+    return await _overlay_markets_payload(db, email, await get_crypto())
 
 
 @router.get("/markets/forex", tags=["markets"])
-async def markets_forex() -> Dict[str, Any]:
+async def markets_forex(
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
     """Get forex market data from Twelve Data.
     
     Returns 10 major currency pairs.
     """
-    return await get_forex()
+    return await _overlay_markets_payload(db, email, await get_forex())
 
 
 @router.get("/markets/commodities", tags=["markets"])
-async def markets_commodities() -> Dict[str, Any]:
+async def markets_commodities(
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
     """Get commodities market data.
     
     Returns Gold, Silver, Oil, Brent, Natural Gas.
     """
-    return await get_commodities()
+    return await _overlay_markets_payload(db, email, await get_commodities())
 
 
 @router.get("/markets/bonds", tags=["markets"])
-async def markets_bonds() -> Dict[str, Any]:
+async def markets_bonds(
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
     """Get bond market data from FRED.
     
     Returns US Treasury yields (1M, 3M, 6M, 1Y, 2Y, 5Y, 10Y, 30Y).
     """
-    return await get_bonds()
+    return await _overlay_markets_payload(db, email, await get_bonds())
 
 
 @router.get("/markets/etfs", tags=["markets"])
-async def markets_etfs() -> Dict[str, Any]:
+async def markets_etfs(
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
     """Get ETF market data."""
-    return await get_etfs()
+    return await _overlay_markets_payload(db, email, await get_etfs())
 
 
 @router.get("/markets/indices", tags=["markets"])
-async def markets_indices() -> Dict[str, Any]:
+async def markets_indices(
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
     """Get equity index market data."""
-    return await get_indices()
+    return await _overlay_markets_payload(db, email, await get_indices())
 
 
 @router.get("/markets/news-ticker", tags=["markets"])
@@ -394,7 +539,11 @@ async def markets_news_ticker() -> Dict[str, Any]:
 
 
 @router.get("/markets/{asset_class}", tags=["markets"])
-async def markets_by_class(asset_class: str) -> Dict[str, Any]:
+async def markets_by_class(
+    asset_class: str,
+    email: str | None = Depends(optional_user_email),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
     """Get market data for a specific asset class.
     
     Args:
@@ -403,4 +552,6 @@ async def markets_by_class(asset_class: str) -> Dict[str, Any]:
     Returns:
         Market data for the specified asset class
     """
-    return await get_by_asset_class(asset_class)
+    return await _overlay_markets_payload(
+        db, email, await get_by_asset_class(asset_class)
+    )

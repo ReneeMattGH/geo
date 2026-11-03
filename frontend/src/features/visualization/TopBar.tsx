@@ -1,6 +1,7 @@
-import { Globe, Map, BarChart2, Briefcase, Activity, Shield, Wifi, TrendingUp, TrendingDown, Minus, Clock, Menu, X, Info } from 'lucide-react'
+import { Globe, Map, BarChart2, Briefcase, Activity, Shield, Wifi, TrendingUp, TrendingDown, Minus, Clock, Menu, X, Info, Settings } from 'lucide-react'
 import { cn } from '@/shared/ui/Panel'
 import { useStore, type VisualizationMode } from '@/shared/state/store'
+import { formatClock, zoneLabel } from '@/shared/settings/preferences'
 import { useEffect, useState } from 'react'
 
 const MODES: { id: VisualizationMode; label: string; sub: string; icon: typeof Globe }[] = [
@@ -12,12 +13,19 @@ const MODES: { id: VisualizationMode; label: string; sub: string; icon: typeof G
 ]
 
 function LiveClock() {
-    const [t, setT] = useState(() => new Date().toISOString().substring(11, 19))
+    const timeZone = useStore(s => s.preferences.timeZone)
+    const timeFormat = useStore(s => s.preferences.timeFormat)
+    const [now, setNow] = useState(() => new Date())
     useEffect(() => {
-        const id = setInterval(() => setT(new Date().toISOString().substring(11, 19)), 1000)
+        const id = setInterval(() => setNow(new Date()), 1000)
         return () => clearInterval(id)
     }, [])
-    return <span className="font-mono text-[11px] tabular-nums text-gray-400">{t} UTC</span>
+    return (
+        <span className="font-mono text-[11px] tabular-nums text-gray-400">
+            {formatClock(now, timeZone, timeFormat)}
+            <span className="ml-1 text-gray-500">{zoneLabel(timeZone)}</span>
+        </span>
+    )
 }
 
 interface TopBarProps {
@@ -131,25 +139,42 @@ export function TopBar({ gti, onMenuToggle, menuOpen }: TopBarProps) {
                 })}
             </div>
 
-            {/* ── Right: Status — hidden on mobile ── */}
-            <div className="hidden md:flex items-center gap-3 shrink-0">
-                <div className="flex items-center gap-1.5 text-[10px] font-mono bg-green-500/8 border border-green-500/20 rounded-lg px-2.5 py-1.5">
-                    <Wifi className="h-3 w-3 text-green-400 animate-pulse" />
-                    <span className="text-green-400 font-semibold">LIVE</span>
-                    <span className="text-gray-500">·</span>
-                    <span className="text-gray-400 hidden lg:inline">{gti?.top_drivers?.length ?? 12} feeds</span>
+            {/* ── Right: Settings + Status ── */}
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                <button
+                    type="button"
+                    onClick={() => setMode('settings')}
+                    aria-label="Account and API settings"
+                    title="Account, preferences & API keys"
+                    className={cn(
+                        'flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-200 shrink-0',
+                        mode === 'settings'
+                            ? 'bg-purple-500/15 border-purple-400/40 text-purple-200 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
+                            : 'border-white/10 bg-white/[0.03] text-gray-400 hover:text-white hover:bg-white/8'
+                    )}
+                >
+                    <Settings className="h-4 w-4" />
+                </button>
+
+                <div className="hidden md:flex items-center gap-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-mono bg-green-500/8 border border-green-500/20 rounded-lg px-2.5 py-1.5">
+                        <Wifi className="h-3 w-3 text-green-400 animate-pulse" />
+                        <span className="text-green-400 font-semibold">LIVE</span>
+                        <span className="text-gray-500">·</span>
+                        <span className="text-gray-400 hidden lg:inline">{gti?.top_drivers?.length ?? 12} feeds</span>
+                    </div>
+
+                    <div className="hidden lg:flex items-center gap-1.5 text-[10px] bg-[#0a0f1e] border border-gray-700/50 rounded-lg px-2.5 py-1.5">
+                        <Clock className="h-3 w-3 text-gray-500" />
+                        <LiveClock />
+                    </div>
                 </div>
 
-                <div className="hidden lg:flex items-center gap-1.5 text-[10px] bg-[#0a0f1e] border border-gray-700/50 rounded-lg px-2.5 py-1.5">
-                    <Clock className="h-3 w-3 text-gray-500" />
-                    <LiveClock />
+                {/* Live dot — mobile only */}
+                <div className="flex md:hidden items-center gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                    <span className="text-[9px] text-green-400 font-mono">LIVE</span>
                 </div>
-            </div>
-
-            {/* Live dot — mobile only */}
-            <div className="flex md:hidden items-center gap-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                <span className="text-[9px] text-green-400 font-mono">LIVE</span>
             </div>
         </div>
     )

@@ -22,6 +22,7 @@ from app.api.v1 import (
     market,
     portfolio,
     risk,
+    settings as settings_routes,
     signals,
     signals_v2,
     simulate,
@@ -220,6 +221,7 @@ def create_app() -> FastAPI:
         globe.router,
         signals_v2.router,
         waitlist.router,
+        settings_routes.router,
     ]
     for router in api_routers:
         app.include_router(router)
