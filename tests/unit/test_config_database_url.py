@@ -7,26 +7,41 @@ leftover ``sslmode`` keyword.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from app.core.config import Settings
 
 RENDER_URL = "postgres://geo:pw@dpg-x.render.com:5432/geotrade?sslmode=require"
 
+_ENV_VARS = ("DATABASE_URL", "DATABASE_SYNC_URL", "APP_ENV", "ENV")
+
+
+@pytest.fixture(autouse=True)
+def _ignore_local_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep these cases independent of the developer's shell and .env file."""
+    for name in _ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def _settings(**kwargs: Any) -> Settings:
+    return Settings(_env_file=None, **kwargs)
+
 
 def test_bare_postgres_url_is_rewritten_for_asyncpg() -> None:
-    settings = Settings(DATABASE_URL=RENDER_URL)
+    settings = _settings(DATABASE_URL=RENDER_URL)
     assert settings.database_url.startswith("postgresql+asyncpg://")
 
 
 def test_sslmode_is_renamed_to_ssl_for_asyncpg() -> None:
-    settings = Settings(DATABASE_URL=RENDER_URL)
+    settings = _settings(DATABASE_URL=RENDER_URL)
     assert "ssl=require" in settings.database_url
     assert "sslmode=" not in settings.database_url
 
 
 def test_sync_url_defaults_to_psycopg2_with_libpq_sslmode() -> None:
-    settings = Settings(DATABASE_URL=RENDER_URL)
+    settings = _settings(DATABASE_URL=RENDER_URL)
     assert settings.database_sync_url.startswith("postgresql+psycopg2://")
     assert "sslmode=require" in settings.database_sync_url
     assert "ssl=" not in settings.database_sync_url
@@ -34,11 +49,11 @@ def test_sync_url_defaults_to_psycopg2_with_libpq_sslmode() -> None:
 
 def test_already_async_url_is_left_alone() -> None:
     url = "postgresql+asyncpg://u:p@localhost:5432/db"
-    assert Settings(DATABASE_URL=url).database_url == url
+    assert _settings(DATABASE_URL=url).database_url == url
 
 
 def test_explicit_sync_url_still_wins() -> None:
-    settings = Settings(
+    settings = _settings(
         DATABASE_URL=RENDER_URL,
         DATABASE_SYNC_URL="postgresql+psycopg2://other:pw@backup:5432/geotrade",
     )
@@ -48,4 +63,4 @@ def test_explicit_sync_url_still_wins() -> None:
 @pytest.mark.parametrize("raw", ["ENV=production", "APP_ENV=production"])
 def test_env_and_app_env_both_select_production(raw: str) -> None:
     key, _, value = raw.partition("=")
-    assert Settings(**{key: value}).app_env == value
+    assert _settings(**{key: value}).app_env == value
