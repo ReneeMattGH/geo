@@ -14,6 +14,7 @@ import {
     RefreshCw, Filter, X, Info, Activity
 } from 'lucide-react'
 import { api } from '../../shared/api/client'
+import { TradingViewAssetChart } from '@/features/ai-signals/TradingViewAssetChart'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -241,7 +242,24 @@ function SignalCard({
 
 // ── Signal Detail Panel ───────────────────────────────────────────────────────
 
-function SignalDetail({ signal }: { signal: Signal }) {
+// ── Signal Detail ─────────────────────────────────────────────────────────────
+
+function useIsDesktopLayout() {
+    const [isDesktop, setIsDesktop] = useState(
+        () => window.matchMedia('(min-width: 1024px)').matches,
+    )
+
+    useEffect(() => {
+        const query = window.matchMedia('(min-width: 1024px)')
+        const onChange = (event: MediaQueryListEvent) => setIsDesktop(event.matches)
+        query.addEventListener('change', onChange)
+        return () => query.removeEventListener('change', onChange)
+    }, [])
+
+    return isDesktop
+}
+
+function SignalDetail({ signal, showChart = true }: { signal: Signal; showChart?: boolean }) {
     const [tab, setTab] = useState<'setup' | 'reasoning' | 'timeline' | 'reliability'>('setup')
 
     const TABS = [
@@ -547,6 +565,17 @@ function SignalDetail({ signal }: { signal: Signal }) {
                         </motion.div>
                     )}
                 </AnimatePresence>
+
+                <div className="mt-4">
+                    {showChart && (
+                        <TradingViewAssetChart
+                            symbol={signal.symbol}
+                            label={signal.label}
+                            assetClass={signal.asset_class}
+                            region={signal.region}
+                        />
+                    )}
+                </div>
             </div>
         </div>
     )
@@ -649,6 +678,7 @@ export default function TradingCharts() {
     const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null)
     const [searchQuery, setSearchQuery] = useState('')
     const [lastRefresh, setLastRefresh] = useState(new Date())
+    const isDesktopLayout = useIsDesktopLayout()
 
     // Mobile-specific state
     // 'list' = signal cards view, 'detail' = signal detail view, 'filters' = filter drawer
@@ -852,7 +882,7 @@ export default function TradingCharts() {
                                 transition={{ duration: 0.2 }}
                                 className="h-full"
                             >
-                                <SignalDetail signal={selectedSignal} />
+                                <SignalDetail signal={selectedSignal} showChart={isDesktopLayout} />
                             </motion.div>
                         ) : (
                             <motion.div
@@ -976,7 +1006,7 @@ export default function TradingCharts() {
                                 className="h-full overflow-hidden"
                             >
                                 {selectedSignal
-                                    ? <SignalDetail signal={selectedSignal} />
+                                    ? <SignalDetail signal={selectedSignal} showChart={!isDesktopLayout} />
                                     : (
                                         <div className="h-full flex flex-col items-center justify-center gap-3">
                                             <BarChart2 className="h-8 w-8 text-gray-700" />

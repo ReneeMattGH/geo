@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { formatPrice as formatMarketPrice } from '@/shared/api/marketFormat'
 import { API_BASE } from '@/shared/api/client'
+import { TradingViewAssetChart } from './TradingViewAssetChart'
 
 // Types
 interface Signal {
@@ -559,6 +560,14 @@ function SignalDetails({ signal }: { signal: Signal }) {
           ))}
         </div>
       </div>
+
+      {/* TradingView Chart */}
+      <TradingViewAssetChart
+        symbol={signal.symbol}
+        label={signal.label}
+        assetClass={signal.asset_class}
+        region={signal.region}
+      />
 
       {/* Event Timeline */}
       <div className="bg-white/5 border border-white/10 rounded-xl p-6">
